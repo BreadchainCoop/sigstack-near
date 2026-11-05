@@ -6,7 +6,7 @@ description = "Basic Shade Agents contract template with local dependencies"
 license = "Apache-2.0"
 
 # For reproducible builds
-repository = "https://github.com/<xxx>/<xxx>" # Replace with your repository
+repository = "https://github.com/BreadchainCoop/sigstack-near"
 [package.metadata.near.reproducible_build]
 image = "sourcescan/cargo-near:0.19.0-rust-1.86.0"
 image_digest = "sha256:772638e343baeeea24e49062c7d424274f3441452cc06ce97fc4e5695b19fecc"
@@ -26,7 +26,7 @@ crate-type = ["cdylib", "rlib"]
 hex = { version = "=0.4.3", default-features = false, features = ["alloc"] }
 near-sdk = "=5.26.1"
 serde = { version = "=1.0.228", features = ["derive"] }
-shade-attestation = { path = "../shade-attestation" }
+shade-attestation = { git = "https://github.com/NearDeFi/shade-agent-framework", rev = "35758f354ad9862fb590daf9843fea4974d52549" }
 
 [[test]]
 name = "attestation_tests"
@@ -54,7 +54,7 @@ near-api-types = "=0.8.6"
 near-sandbox = "=0.3.11"
 near-sdk = { version = "=5.26.1", features = ["unit-testing"] }
 serde_json = "=1.0.149"
-shade-attestation = { path = "../shade-attestation" }
+shade-attestation = { git = "https://github.com/NearDeFi/shade-agent-framework", rev = "35758f354ad9862fb590daf9843fea4974d52549" }
 tokio = { version = "=1.52.3", features = ["full"] }
 
 [profile.release]
@@ -66,3 +66,6 @@ debug = false
 panic = "abort"
 # Opt into extra safety checks on arithmetic operations https://stackoverflow.com/a/64136471/249801
 overflow-checks = true
+
+# Standalone: not part of the bot workspace at the repo root.
+[workspace]

@@ -3860,6 +3860,7 @@ dependencies = [
 [[package]]
 name = "shade-attestation"
 version = "0.2.0"
+source = "git+https://github.com/NearDeFi/shade-agent-framework?rev=35758f354ad9862fb590daf9843fea4974d52549#35758f354ad9862fb590daf9843fea4974d52549"
 dependencies = [
  "borsh",
  "dcap-qvl",
