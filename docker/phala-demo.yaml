@@ -6,6 +6,11 @@
 # digest (scripts/pin_demo_images.sh rewrites them); only real secrets come from env
 # (docker/.phala-demo.env, see .phala-demo.env.example).
 #
+# No registration proxy: its debug and adopt routes are unauthenticated and could
+# deregister the bot's number. Register once with docker/phala-demo-register.yaml, then
+# upgrade the same CVM in place to this file; the Signal account survives in the
+# signal-config-translation volume. Only this file's compose hash is ever approved.
+#
 # Commerce is left out until the payments work (#15) needs it.
 
 services:
@@ -55,30 +60,8 @@ services:
       - signal-api
     restart: unless-stopped
 
-  signal-registration-proxy:
-    image: ghcr.io/breadchaincoop/sigstack-near-registration-proxy@sha256:42f282aa08a3b196af685bbf96781a8d5d2cf69ff8e500ac5305c0875243f34a
-    environment:
-      - SIGNAL__API_URL=http://signal-api:8080
-      - REGISTRY__PATH=/data/registry.enc
-      - SERVER__LISTEN_ADDR=0.0.0.0
-      - SERVER__PORT=8081
-      - DSTACK__SOCKET_PATH=/var/run/dstack.sock
-      - RATE_LIMIT__GLOBAL_PER_MINUTE=10
-      - RATE_LIMIT__PER_NUMBER_PER_HOUR=3
-      - LOG__LEVEL=info
-    volumes:
-      - /var/run/dstack.sock:/var/run/dstack.sock:ro
-      - registry-data:/data
-    ports:
-      - "8081:8081"
-    depends_on:
-      - signal-api
-    restart: unless-stopped
-
 volumes:
   signal-config-translation:
-    driver: local
-  registry-data:
     driver: local
   group-prefs-translation:
     driver: local
