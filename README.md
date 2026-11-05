@@ -2,6 +2,58 @@
 
 TEE-hosted Signal bot for **voice transcription** and **group translation**, designed as an interoperable product suite.
 
+## NEAR HACKATHON
+
+Built by [Bread Cooperative](https://bread.coop) for **NEAR HACKATHON** (1–14 Nov 2026).
+
+**Private AI you don't have to trust, verifiable from your Signal message to the GPU.**
+
+- **Tracks:** Privacy & Private AI (`privacy`), AI Security & Defense (`security`)
+- **Status:** in development
+
+### What is new for the hackathon
+
+1. **On-chain verification (Shade Agent).** The bot registers its TEE attestation with a NEAR
+   contract that only accepts builds Bread has approved. Anyone can check on NEAR that the bot
+   runs the published code, and every upgrade leaves a public record.
+2. **Model verification.** The bot verifies NEAR AI Cloud's model attestation and response
+   signatures, so `!verify` covers the whole path: your message, this bot's TEE, and the model's TEE.
+3. **Optional: private payments through NEAR Intents.** Pay from any chain, with no card or name,
+   and receive a `!link` code redeemed inside the TEE.
+
+### Prior work and what is judged
+
+Sigstack existed before the hackathon. It already ran in a Phala TEE and used NEAR AI for
+Whisper and translation. Per the hackathon rules (Q-002 to Q-004), all of that is **baseline**.
+**Only the NEAR work listed above, built during the hackathon window, is submitted for judging.**
+
+- Baseline: [BreadchainCoop/sigstack-bot](https://github.com/BreadchainCoop/sigstack-bot) at
+  [`b9b4a0e`](https://github.com/BreadchainCoop/sigstack-bot/tree/b9b4a0eda886d54aa808ab2fe597e6c9a3943cf9)
+  (last commit 9 Oct 2026, before the hackathon was announced on 19 Oct). This repo carries its
+  full history; that commit is tagged `pre-hackathon`.
+- Hackathon work: everything after the `pre-hackathon` tag. Full diff:
+  [`pre-hackathon...hackathon-submission`](https://github.com/BreadchainCoop/sigstack-near/compare/pre-hackathon...hackathon-submission)
+  (until the submission tag exists: [`pre-hackathon...main`](https://github.com/BreadchainCoop/sigstack-near/compare/pre-hackathon...main))
+- The hackathon build runs on a separate demo deployment. The production Sigstack bot is not
+  changed by this repo.
+
+### Try it
+
+_To be written: the demo bot's Signal link, the public verifier page, and "do X, see Y" steps a
+judge can follow._
+
+### Libraries and tools
+
+_Third-party libraries added for the hackathon work will be listed here (rule Q-005)._
+
+### Other submissions
+
+Bread Cooperative is also submitting
+[saving-circles-near](https://github.com/BreadchainCoop/saving-circles-near), an independent
+project (rule Q-015).
+
+---
+
 Not a general AI chat assistant. Conversation history, tool-calling, and x402 credits have been removed from this fork.
 
 ## Products
