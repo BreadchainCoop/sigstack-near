@@ -1,3 +1,5 @@
+> **Origin:** imported from [NearDeFi/shade-agent-framework](https://github.com/NearDeFi/shade-agent-framework/tree/35758f354ad9862fb590daf9843fea4974d52549/shade-contract-template) `shade-contract-template` at `35758f3` (Apache-2.0). Changes from upstream are in this repo's git history.
+
 # shade-contract-template
 
 Example NEAR smart contract for the Shade Agent Framework that uses a local version of the shade-attestation crate.
