@@ -1,0 +1,84 @@
+# NEAR HACKATHON demo — its own CVM and Signal number. Never deploy this to the
+# production CVM (0e82fa77-…); production uses docker/phala.yaml.
+#
+# Everything a verifier relies on is written into this file, because dstack measures
+# this file's text into the compose hash but not env var values. Images are pinned by
+# digest (scripts/pin_demo_images.sh rewrites them); only real secrets come from env
+# (docker/.phala-demo.env, see .phala-demo.env.example).
+#
+# Commerce is left out until the payments work (#15) needs it.
+
+services:
+  signal-api:
+    image: bbernhard/signal-cli-rest-api@sha256:2399d449123cdad56c4d859277e3b9127e1a00c4d2ab4601c239882609286cf8
+    environment:
+      - MODE=normal
+      - LOG_LEVEL=info
+    volumes:
+      - signal-config-translation:/home/.local/share/signal-cli
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  signal-bot:
+    image: ghcr.io/breadchaincoop/sigstack-near-bot-tee@sha256:76ca76b469349d7e9e15f13e2fa027446f5e20624d5606c0db4db2e92e4de9df
+    environment:
+      - SIGNAL__SERVICE_URL=http://signal-api:8080
+      - SIGNAL__PHONE_NUMBER=${SIGNAL_PHONE}
+      - NEAR_AI__API_KEY=${NEAR_AI_API_KEY}
+      - NEAR_AI__BASE_URL=https://cloud-api.near.ai/v1
+      - NEAR_AI__MODEL=deepseek-ai/DeepSeek-V4-Flash
+      - NEAR_AI__TIMEOUT=120s
+      - WHISPER__ENABLED=true
+      - WHISPER__SERVICE_URL=https://cloud-api.near.ai/v1
+      - WHISPER__MODEL=openai/whisper-large-v3
+      - WHISPER__TIMEOUT=120s
+      - TRANSLATE_ALL__ENABLED=true
+      - TRANSLATE_ALL__MAX_MESSAGES_PER_MINUTE=30
+      - BOT__LOG_LEVEL=info
+      - BOT__SIGNAL_USERNAME=sigstackdemo
+      - BOT__GITHUB_REPO=https://github.com/BreadchainCoop/sigstack-near
+      - DSTACK__SOCKET_PATH=/var/run/dstack.sock
+      - GROUP_PREFERENCES__PERSIST=true
+      - GROUP_PREFERENCES__STORAGE_PATH=/data/group_prefs.enc
+      - ENTITLEMENTS__PERSIST=true
+      - ENTITLEMENTS__STORAGE_PATH=/data/entitlements.enc
+      - ENTITLEMENTS__ENFORCE=false
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock:ro
+      - group-prefs-translation:/data
+    depends_on:
+      - signal-api
+    restart: unless-stopped
+
+  signal-registration-proxy:
+    image: ghcr.io/breadchaincoop/sigstack-near-registration-proxy@sha256:42f282aa08a3b196af685bbf96781a8d5d2cf69ff8e500ac5305c0875243f34a
+    environment:
+      - SIGNAL__API_URL=http://signal-api:8080
+      - REGISTRY__PATH=/data/registry.enc
+      - SERVER__LISTEN_ADDR=0.0.0.0
+      - SERVER__PORT=8081
+      - DSTACK__SOCKET_PATH=/var/run/dstack.sock
+      - RATE_LIMIT__GLOBAL_PER_MINUTE=10
+      - RATE_LIMIT__PER_NUMBER_PER_HOUR=3
+      - LOG__LEVEL=info
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock:ro
+      - registry-data:/data
+    ports:
+      - "8081:8081"
+    depends_on:
+      - signal-api
+    restart: unless-stopped
+
+volumes:
+  signal-config-translation:
+    driver: local
+  registry-data:
+    driver: local
+  group-prefs-translation:
+    driver: local
