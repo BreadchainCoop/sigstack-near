@@ -34,11 +34,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: signal-bot-tee
+          - name: sigstack-near-bot-tee
             dockerfile: docker/Dockerfile
-          - name: signal-registration-proxy
+          - name: sigstack-near-registration-proxy
             dockerfile: docker/Dockerfile.proxy
-          - name: signal-commerce
+          - name: sigstack-near-commerce
             dockerfile: docker/Dockerfile.commerce
     steps:
       - uses: actions/checkout@v4
