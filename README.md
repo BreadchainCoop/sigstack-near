@@ -58,6 +58,11 @@ To check a running bot yourself:
 Every code change produces a new digest, so a new compose hash that must be approved
 on-chain before the bot can register. Upgrades are public by construction.
 
+The approved compose has no registration proxy, whose debug routes are unauthenticated.
+The demo number is registered once with
+[`docker/phala-demo-register.yaml`](docker/phala-demo-register.yaml), whose compose hash
+is never approved, and the CVM is then upgraded in place to the demo compose.
+
 ### Try it
 
 _To be written: the demo bot's Signal link, the public verifier page, and "do X, see Y" steps a

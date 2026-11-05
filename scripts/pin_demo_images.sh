@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pin docker/phala-demo.yaml's sigstack-near images to the digests CI built for a commit.
+# Pin the demo composes' sigstack-near images to the digests CI built for a commit.
 #
 #   ./scripts/pin_demo_images.sh          # commit at origin/main
 #   ./scripts/pin_demo_images.sh <sha>    # a specific commit
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE="${COMPOSE:-$ROOT/docker/phala-demo.yaml}"
+COMPOSES=("$ROOT/docker/phala-demo.yaml" "$ROOT/docker/phala-demo-register.yaml")
 OWNER=breadchaincoop
 IMAGES=(sigstack-near-bot-tee sigstack-near-registration-proxy)
 ACCEPT="application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json"
@@ -26,9 +26,11 @@ for name in "${IMAGES[@]}"; do
     echo "No $name image tagged sha-$SHA: not built yet, or the package is not public." >&2
     exit 1
   fi
-  sed -i.bak -E "s#(ghcr\.io/$OWNER/$name)@sha256:[0-9a-f]{64}#\1@$digest#" "$COMPOSE"
-  rm -f "$COMPOSE.bak"
+  for compose in "${COMPOSES[@]}"; do
+    sed -i.bak -E "s#(ghcr\.io/$OWNER/$name)@sha256:[0-9a-f]{64}#\1@$digest#" "$compose"
+    rm -f "$compose.bak"
+  done
   echo "$name@$digest"
 done
 
-echo "Pinned to $SHA in ${COMPOSE#"$ROOT"/}"
+echo "Pinned to $SHA in docker/phala-demo.yaml and docker/phala-demo-register.yaml"
