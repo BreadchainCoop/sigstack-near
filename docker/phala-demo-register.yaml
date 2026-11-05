@@ -1,0 +1,49 @@
+# NEAR HACKATHON demo, registration phase only. Deploy this to the demo CVM to register
+# its Signal number through the proxy on :8081, then upgrade the same CVM in place to
+# docker/phala-demo.yaml. Never run the bot from this file and never approve its compose
+# hash: the proxy's debug and adopt routes are unauthenticated.
+#
+# Keep signal-config-translation identical to phala-demo.yaml; it carries the registered
+# Signal account across the upgrade.
+
+services:
+  signal-api:
+    image: bbernhard/signal-cli-rest-api@sha256:2399d449123cdad56c4d859277e3b9127e1a00c4d2ab4601c239882609286cf8
+    environment:
+      - MODE=normal
+      - LOG_LEVEL=info
+    volumes:
+      - signal-config-translation:/home/.local/share/signal-cli
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  signal-registration-proxy:
+    image: ghcr.io/breadchaincoop/sigstack-near-registration-proxy@sha256:42f282aa08a3b196af685bbf96781a8d5d2cf69ff8e500ac5305c0875243f34a
+    environment:
+      - SIGNAL__API_URL=http://signal-api:8080
+      - REGISTRY__PATH=/data/registry.enc
+      - SERVER__LISTEN_ADDR=0.0.0.0
+      - SERVER__PORT=8081
+      - DSTACK__SOCKET_PATH=/var/run/dstack.sock
+      - RATE_LIMIT__GLOBAL_PER_MINUTE=10
+      - RATE_LIMIT__PER_NUMBER_PER_HOUR=3
+      - LOG__LEVEL=info
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock:ro
+      - registry-data:/data
+    ports:
+      - "8081:8081"
+    depends_on:
+      - signal-api
+    restart: unless-stopped
+
+volumes:
+  signal-config-translation:
+    driver: local
+  registry-data:
+    driver: local

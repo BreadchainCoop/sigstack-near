@@ -37,6 +37,32 @@ Whisper and translation. Per the hackathon rules (Q-002 to Q-004), all of that i
 - The hackathon build runs on a separate demo deployment. The production Sigstack bot is not
   changed by this repo.
 
+### What the attestation pins
+
+The demo runs [`docker/phala-demo.yaml`](docker/phala-demo.yaml). dstack measures that
+file's text into the **compose hash**, which is what the agent contract approves. Env var
+values are not measured, so the demo compose names every image by digest and writes
+every setting into the file. Only real secrets (Signal phone, NEAR AI API key) come
+from env.
+
+To check a running bot yourself:
+
+1. Get its attestation (`!verify` in Signal, or the verifier page). It includes
+   `app_compose`, the exact compose the CVM booted.
+2. sha256 of `app_compose` should equal the attested compose hash, and that hash
+   should be one the agent contract approves.
+3. Inside `app_compose`, read the image digests. Each is tagged `sha-<commit>` in
+   `ghcr.io/breadchaincoop/sigstack-near-*`, built by the [`images`](.github/workflows/images.yml)
+   workflow from that commit of this repo.
+
+Every code change produces a new digest, so a new compose hash that must be approved
+on-chain before the bot can register. Upgrades are public by construction.
+
+The approved compose has no registration proxy, whose debug routes are unauthenticated.
+The demo number is registered once with
+[`docker/phala-demo-register.yaml`](docker/phala-demo-register.yaml), whose compose hash
+is never approved, and the CVM is then upgraded in place to the demo compose.
+
 ### Try it
 
 _To be written: the demo bot's Signal link, the public verifier page, and "do X, see Y" steps a
