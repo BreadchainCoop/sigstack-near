@@ -2,7 +2,7 @@
 
 # shade-contract-template
 
-Example NEAR smart contract for the Shade Agent Framework that uses a local version of the shade-attestation crate.
+Example NEAR smart contract for the Shade Agent Framework. It uses the shade-attestation crate from the framework repo, pinned at `35758f3` (see the origin note above).
 
 ## Registering agents
 
@@ -18,27 +18,25 @@ Note that in this example for the TEE case, any agent, as long as it passes atte
 
 ## Building the contract
 
-You currently need to build this contract without an ABI.
-
-In the shade-agent-framework root
+You currently need to build this contract without an ABI. CI builds it with
+[`.github/workflows/contract.yml`](../../.github/workflows/contract.yml).
 
 ### Linux
 
+From this directory:
+
 ```bash
-cd shade-contract-template
-cargo near build non-reproducible-wasm --no-abi
+cargo near build non-reproducible-wasm --locked --no-abi
 ```
 
 ### Mac
 
-The ring dependency is dcap-qvl, which cannot be built on mac so build the contract using this Docker image.
+dcap-qvl's ring dependency cannot be built on Mac, so build in the pinned image CI uses. From this directory:
 
 ```bash
-docker run --rm \
--v "$(pwd)":/workspace \
--w "/workspace/shade-contract-template" \
-pivortex/near-builder:latest \
-cargo near build non-reproducible-wasm --no-abi
+docker run --rm -v "$(pwd)":/workspace -w /workspace \
+  sourcescan/cargo-near@sha256:772638e343baeeea24e49062c7d424274f3441452cc06ce97fc4e5695b19fecc \
+  cargo near build non-reproducible-wasm --locked --no-abi
 ```
 
 ## Testing
