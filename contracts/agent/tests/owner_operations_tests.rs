@@ -3,7 +3,7 @@ mod helpers;
 use helpers::*;
 use near_api::Data;
 use serde_json::json;
-use shade_contract_template::ContractInfo;
+use sigstack_agent::ContractInfo;
 use tokio::time::{Duration, sleep};
 
 /// Tests owner transfer and new owner operations
