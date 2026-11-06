@@ -5,7 +5,6 @@ pub struct ContractInfo {
     pub requires_tee: bool,
     pub attestation_expiration_time_ms: U64,
     pub owner_id: AccountId,
-    pub mpc_contract_id: AccountId,
 }
 
 #[near(serializers = [json])]
@@ -31,7 +30,6 @@ impl Contract {
             requires_tee: self.requires_tee,
             attestation_expiration_time_ms: U64::from(self.attestation_expiration_time_ms),
             owner_id: self.owner_id.clone(),
-            mpc_contract_id: self.mpc_contract_id.clone(),
         }
     }
 
