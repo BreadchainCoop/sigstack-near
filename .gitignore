@@ -55,7 +55,4 @@ credentials.json
 .compound-engineering/*.local.yaml
 .compound-engineering/config.local.yaml
 docker/ops/
-branch_structure.json
-temp_auto_push.bat
-temp_interactive_push.bat
 /contracts/*/target/
