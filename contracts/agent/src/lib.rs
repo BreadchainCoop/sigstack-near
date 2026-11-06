@@ -2,7 +2,6 @@ use hex;
 use near_sdk::{
     AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise,
     env::{self, block_timestamp_ms},
-    ext_contract,
     json_types::U64,
     log, near, require,
     serde::Serialize,
@@ -23,7 +22,6 @@ pub use views::{AgentValidity, AgentView, ContractInfo};
 mod internal;
 mod owner;
 pub mod views;
-mod your_functions;
 
 pub type Ppid = HexBytes<16>;
 
@@ -33,7 +31,6 @@ pub struct Contract {
     pub requires_tee: bool,
     pub attestation_expiration_time_ms: u64,
     pub owner_id: AccountId,
-    pub mpc_contract_id: AccountId,
     pub approved_measurements: IterableSet<FullMeasurementsHex>,
     pub approved_ppids: IterableSet<Ppid>,
     pub agents: IterableMap<AccountId, Agent>,
@@ -66,13 +63,11 @@ impl Contract {
         requires_tee: bool,
         attestation_expiration_time_ms: U64,
         owner_id: AccountId,
-        mpc_contract_id: AccountId,
     ) -> Self {
         Self {
             requires_tee,
             attestation_expiration_time_ms: attestation_expiration_time_ms.into(),
             owner_id,
-            mpc_contract_id, // Set to v1.signer-prod.testnet for testnet, v1.signer for mainnet
             approved_measurements: IterableSet::new(StorageKey::ApprovedMeasurements),
             approved_ppids: IterableSet::new(StorageKey::ApprovedPpids),
             agents: IterableMap::new(StorageKey::Agents),
@@ -130,5 +125,29 @@ impl Contract {
         );
 
         true
+    }
+
+    // Anyone can remove an agent that is no longer valid, so stale attestations
+    // don't linger in state or depend on the owner to clean them up.
+    pub fn prune_agent(&mut self, account_id: AccountId) -> Vec<AgentRemovalReason> {
+        let agent = self.agents.get(&account_id).expect("Agent not registered");
+        let reasons = self.check_invalid_reasons(&account_id, agent);
+        require!(!reasons.is_empty(), "Agent is valid");
+
+        self.agents.remove(&account_id);
+        Event::AgentRemoved {
+            account_id: &account_id,
+            reasons: reasons.clone(),
+        }
+        .emit();
+        reasons
+    }
+
+    // Target of `update_contract`. State is read as-is, so a release that changes
+    // the `Contract` layout must convert from the old layout here.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        env::state_read().expect("No contract state")
     }
 }

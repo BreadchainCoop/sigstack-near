@@ -1,6 +1,6 @@
 use crate::*;
 
-const EVENT_STANDARD: &str = "shade-contract-template";
+const EVENT_STANDARD: &str = "sigstack-agent";
 const EVENT_STANDARD_VERSION: &str = "1.0.0";
 
 /// Maximum number of advisory IDs surfaced in an event; the full count is reported

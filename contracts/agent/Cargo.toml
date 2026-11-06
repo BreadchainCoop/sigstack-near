@@ -1,8 +1,8 @@
 [package]
-name = "shade-contract-template"
+name = "sigstack-agent"
 version = "0.1.0"
 edition = "2024"
-description = "Basic Shade Agents contract template with local dependencies"
+description = "Registry of Sigstack bots whose TEE attestation matches an approved build"
 license = "Apache-2.0"
 
 # For reproducible builds
@@ -31,10 +31,6 @@ shade-attestation = { git = "https://github.com/NearDeFi/shade-agent-framework",
 [[test]]
 name = "attestation_tests"
 path = "tests/attestation_tests.rs"
-
-[[test]]
-name = "cross_contract_tests"
-path = "tests/cross_contract_tests.rs"
 
 [[test]]
 name = "large_num_agents_tests"

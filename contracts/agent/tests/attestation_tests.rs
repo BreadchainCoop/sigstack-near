@@ -4,16 +4,16 @@ use helpers::*;
 use near_api::Data;
 use serde_json::json;
 use shade_attestation::attestation::create_mock_dstack_attestation;
-use shade_contract_template::{AgentRemovalReason, AgentValidity, AgentView};
+use sigstack_agent::{AgentRemovalReason, AgentValidity, AgentView};
 use tokio::time::{Duration, sleep};
 
 /// Tests measurements/PPID lifecycle with multiple agents:
 /// - Verifies that measurements removal affects all registered agents (validity -> Invalid with InvalidMeasurements)
-/// - Ensures agents with removed measurements and PPID cannot request signatures and are removed with both InvalidMeasurements and InvalidPpid reasons
-/// - Ensures agents with removed PPID only cannot request signatures and are removed with InvalidPpid reason
+/// - Ensures agents with removed measurements and PPID can be pruned, with both InvalidMeasurements and InvalidPpid reasons
+/// - Ensures agents with removed PPID only can be pruned, with InvalidPpid reason
 /// - Confirms that re-approving measurements restores access for remaining registered agents
 /// - Validates that removed agents cannot be re-registered even after measurements re-approval
-/// - Verifies that signature requests are re-enabled after measurements re-approval
+/// - Verifies that a re-validated agent can no longer be pruned
 #[tokio::test]
 async fn test_measurements_and_ppid_lifecycle()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -149,16 +149,11 @@ async fn test_measurements_and_ppid_lifecycle()
 
     sleep(Duration::from_millis(200)).await;
 
-    // Attempt to request a signature with removed measurements and PPID
-    // This will remove the agent, emit an event with both reasons, and the Promise (fail_on_invalid_agent) resolves to panic
+    // Prune agent1, now invalid on both measurements and PPID
     let result = call_transaction(
         &contract_id,
-        "request_signature",
-        json!({
-            "path": "path",
-            "payload": "test_payload",
-            "key_type": "Ecdsa"
-        }),
+        "prune_agent",
+        json!({ "account_id": agent1_id }),
         &agent1_id,
         &agent1_signer,
         &network_config,
@@ -169,24 +164,13 @@ async fn test_measurements_and_ppid_lifecycle()
     // Extract event logs before consuming result
     let events = extract_event_logs(&result)?;
 
-    // Verify the promise resolves to an error (fail_on_invalid_agent panics with both InvalidMeasurements and InvalidPpid)
-    match result.into_result() {
-        Ok(_) => panic!(
-            "Expected request_signature to fail (promise resolves to error) when agent has invalid measurements and PPID, but it succeeded"
-        ),
-        Err(e) => {
-            let error_str = format!("{:?}", e);
-            assert!(
-                error_str.contains("Invalid agent")
-                    && error_str.contains("InvalidMeasurements")
-                    && error_str.contains("InvalidPpid"),
-                "Expected panic to contain 'Invalid agent', 'InvalidMeasurements' and 'InvalidPpid', got: {:?}",
-                e
-            );
-        }
-    }
+    let reasons: Vec<String> = result
+        .into_result()
+        .expect("prune_agent should remove an invalid agent")
+        .json()?;
+    assert_eq!(reasons, ["InvalidMeasurements", "InvalidPpid"]);
 
-    // Verify agent is removed from map (require_valid_agent removed it)
+    // Verify agent is removed from map
     sleep(Duration::from_millis(200)).await;
     let agent_info: Data<Option<AgentView>> = call_view(
         &contract_id,
@@ -333,16 +317,11 @@ async fn test_measurements_and_ppid_lifecycle()
         "Agent2 should have approved measurements and PPID again"
     );
 
-    // Agent1 was removed, so request_signature should fail with "Agent not registered"
-    // Agent2 can request signatures again (will fail with AccountDoesNotExist for mpc-contract)
+    // Agent1 was already pruned
     let result = call_transaction(
         &contract_id,
-        "request_signature",
-        json!({
-            "path": "path",
-            "payload": "test_payload",
-            "key_type": "Ecdsa"
-        }),
+        "prune_agent",
+        json!({ "account_id": agent1_id }),
         &agent1_id,
         &agent1_signer,
         &network_config,
@@ -365,15 +344,11 @@ async fn test_measurements_and_ppid_lifecycle()
         }
     }
 
-    // Agent2 can request signatures again (will fail with AccountDoesNotExist for mpc-contract)
+    // Agent2 is valid again, so it cannot be pruned
     let result = call_transaction(
         &contract_id,
-        "request_signature",
-        json!({
-            "path": "path",
-            "payload": "test_payload",
-            "key_type": "Ecdsa"
-        }),
+        "prune_agent",
+        json!({ "account_id": agent2_id }),
         &agent2_id,
         &agent2_signer,
         &network_config,
@@ -384,15 +359,13 @@ async fn test_measurements_and_ppid_lifecycle()
 
     match result {
         Ok(_) => {
-            panic!(
-                "Expected transaction to fail with AccountDoesNotExist for mpc-contract, but it succeeded"
-            );
+            panic!("Expected prune_agent to fail with 'Agent is valid', but it succeeded");
         }
         Err(e) => {
             let error_str = format!("{:?}", e);
             assert!(
-                error_str.contains("AccountDoesNotExist") && error_str.contains("mpc-contract"),
-                "Expected AccountDoesNotExist error for mpc-contract, but got: {:?}",
+                error_str.contains("Agent is valid"),
+                "Expected 'Agent is valid' error, but got: {:?}",
                 e
             );
         }
@@ -431,16 +404,11 @@ async fn test_measurements_and_ppid_lifecycle()
         "Agent2 should have approved measurements but not approved PPID"
     );
 
-    // Attempt to request a signature with removed PPID using agent2
-    // This will remove agent2, emit an event, and the Promise (fail_on_invalid_agent) resolves to panic
+    // Prune agent2, now invalid on PPID only
     let result = call_transaction(
         &contract_id,
-        "request_signature",
-        json!({
-            "path": "path",
-            "payload": "test_payload",
-            "key_type": "Ecdsa"
-        }),
+        "prune_agent",
+        json!({ "account_id": agent2_id }),
         &agent2_id,
         &agent2_signer,
         &network_config,
@@ -451,22 +419,13 @@ async fn test_measurements_and_ppid_lifecycle()
     // Extract event logs before consuming result
     let events = extract_event_logs(&result)?;
 
-    // Verify the promise resolves to an error (fail_on_invalid_agent panics with "Invalid agent: [InvalidPpid]")
-    match result.into_result() {
-        Ok(_) => panic!(
-            "Expected request_signature to fail (promise resolves to error) when agent has invalid PPID, but it succeeded"
-        ),
-        Err(e) => {
-            let error_str = format!("{:?}", e);
-            assert!(
-                error_str.contains("Invalid agent") && error_str.contains("InvalidPpid"),
-                "Expected panic to contain 'Invalid agent' and 'InvalidPpid', got: {:?}",
-                e
-            );
-        }
-    }
+    let reasons: Vec<String> = result
+        .into_result()
+        .expect("prune_agent should remove an invalid agent")
+        .json()?;
+    assert_eq!(reasons, ["InvalidPpid"]);
 
-    // Verify agent2 is removed from map (require_valid_agent removed it)
+    // Verify agent2 is removed from map
     sleep(Duration::from_millis(200)).await;
     let agent2_info: Data<Option<AgentView>> = call_view(
         &contract_id,
@@ -522,15 +481,11 @@ async fn test_measurements_and_ppid_lifecycle()
 
     sleep(Duration::from_millis(200)).await;
 
-    // request_signature should fail with "Agent not registered" (agent1 was removed earlier)
+    // Agent1 was pruned earlier
     let result = call_transaction(
         &contract_id,
-        "request_signature",
-        json!({
-            "path": "path",
-            "payload": "test_payload",
-            "key_type": "Ecdsa"
-        }),
+        "prune_agent",
+        json!({ "account_id": agent1_id }),
         &agent1_id,
         &agent1_signer,
         &network_config,
@@ -809,16 +764,11 @@ async fn test_attestation_expiration() -> Result<(), Box<dyn std::error::Error +
         "Agent should not be valid (expired)"
     );
 
-    // Try to request signature - should remove agent, emit event with ExpiredAttestation reason,
-    // and the Promise (fail_on_invalid_agent) resolves to panic
+    // Prune the expired agent
     let result = call_transaction(
         &contract_id,
-        "request_signature",
-        json!({
-            "path": "path",
-            "payload": "test_payload",
-            "key_type": "Ecdsa"
-        }),
+        "prune_agent",
+        json!({ "account_id": agent_id }),
         &agent_id,
         &agent_signer,
         &network_config,
@@ -829,20 +779,11 @@ async fn test_attestation_expiration() -> Result<(), Box<dyn std::error::Error +
     // Extract event logs before consuming result
     let events = extract_event_logs(&result)?;
 
-    // Verify the promise resolves to an error (fail_on_invalid_agent panics with "Invalid agent: [ExpiredAttestation]")
-    match result.into_result() {
-        Ok(_) => panic!(
-            "Expected request_signature to fail (promise resolves to error) when agent attestation is expired, but it succeeded"
-        ),
-        Err(e) => {
-            let error_str = format!("{:?}", e);
-            assert!(
-                error_str.contains("Invalid agent") && error_str.contains("ExpiredAttestation"),
-                "Expected panic to contain 'Invalid agent' and 'ExpiredAttestation', got: {:?}",
-                e
-            );
-        }
-    }
+    let reasons: Vec<String> = result
+        .into_result()
+        .expect("prune_agent should remove an invalid agent")
+        .json()?;
+    assert_eq!(reasons, ["ExpiredAttestation"]);
 
     sleep(Duration::from_millis(200)).await;
 
@@ -886,15 +827,11 @@ async fn test_attestation_expiration() -> Result<(), Box<dyn std::error::Error +
         reasons
     );
 
-    // Next call should panic because agent is not registered
+    // A second prune fails because the agent is gone
     let result = call_transaction(
         &contract_id,
-        "request_signature",
-        json!({
-            "path": "path",
-            "payload": "test_payload",
-            "key_type": "Ecdsa"
-        }),
+        "prune_agent",
+        json!({ "account_id": agent_id }),
         &agent_id,
         &agent_signer,
         &network_config,

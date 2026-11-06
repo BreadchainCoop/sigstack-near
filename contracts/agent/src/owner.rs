@@ -14,12 +14,6 @@ impl Contract {
         self.owner_id = owner_id;
     }
 
-    // Update the MPC contract ID
-    pub fn update_mpc_contract_id(&mut self, mpc_contract_id: AccountId) {
-        self.require_owner();
-        self.mpc_contract_id = mpc_contract_id;
-    }
-
     // Add a new set of measurements to the approved list
     pub fn approve_measurements(&mut self, measurements: FullMeasurementsHex) {
         self.require_owner();

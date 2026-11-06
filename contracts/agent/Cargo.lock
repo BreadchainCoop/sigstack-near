@@ -3877,21 +3877,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shade-contract-template"
-version = "0.1.0"
-dependencies = [
- "hex",
- "near-api",
- "near-api-types",
- "near-sandbox",
- "near-sdk",
- "serde",
- "serde_json",
- "shade-attestation",
- "tokio",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3924,6 +3909,21 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "sigstack-agent"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "near-api",
+ "near-api-types",
+ "near-sandbox",
+ "near-sdk",
+ "serde",
+ "serde_json",
+ "shade-attestation",
+ "tokio",
 ]
 
 [[package]]
