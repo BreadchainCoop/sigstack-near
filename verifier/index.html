@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sigstack Verifier</title>
+<meta name="description" content="Check, live from NEAR testnet, which Sigstack builds are approved, which bot is registered, and that each approved build traces to published source.">
+<style>
+  :root {
+    --bg: #fbfaf7; --surface: #ffffff; --text: #1d1c1a; --muted: #5f5c55; --border: #e3e0d8;
+    --accent: #2f5bd3; --ok: #1d7a46; --ok-bg: #e6f4ec; --bad: #b42318; --bad-bg: #fdecea;
+    --warn: #8a5a00; --warn-bg: #fff4dc; --code-bg: #f3f1ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161614; --surface: #1f1f1c; --text: #ecebe6; --muted: #a7a49b; --border: #34332f;
+      --accent: #8aa8ff; --ok: #6fd39b; --ok-bg: #173324; --bad: #ff8a80; --bad-bg: #3a1a17;
+      --warn: #f3c56b; --warn-bg: #362a12; --code-bg: #2a2a26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161614; --surface: #1f1f1c; --text: #ecebe6; --muted: #a7a49b; --border: #34332f;
+    --accent: #8aa8ff; --ok: #6fd39b; --ok-bg: #173324; --bad: #ff8a80; --bad-bg: #3a1a17;
+    --warn: #f3c56b; --warn-bg: #362a12; --code-bg: #2a2a26;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.75rem; margin: 0 0 4px; }
+  h2 { font-size: 1.2rem; margin: 40px 0 12px; }
+  h3 { font-size: 1rem; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  a { color: var(--accent); }
+  .lede { color: var(--muted); margin-bottom: 24px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; margin-bottom: 12px;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0; }
+  .row > .k { color: var(--muted); min-width: 150px; }
+  .row > .v { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.86em;
+    overflow-wrap: anywhere;
+  }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  .badge {
+    display: inline-block; font-size: 0.8rem; font-weight: 600; padding: 2px 8px;
+    border-radius: 999px; white-space: nowrap;
+  }
+  .ok { color: var(--ok); background: var(--ok-bg); }
+  .bad { color: var(--bad); background: var(--bad-bg); }
+  .warn { color: var(--warn); background: var(--warn-bg); }
+  .pending { color: var(--muted); background: var(--code-bg); }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); }
+  ul.checks { padding-left: 20px; margin: 0 0 12px; }
+  ul.checks li { margin: 4px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
+  .note { color: var(--muted); font-size: 0.9rem; }
+  .error { color: var(--bad); }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Sigstack verifier</h1>
+  <p class="lede">
+    Sigstack is a Signal bot for voice transcription and group translation that runs in an Intel TDX
+    enclave on Phala Cloud. Before it can register, the NEAR contract checks its attestation against
+    builds the owner has approved. This page reads that contract live from NEAR testnet and checks, in
+    your browser, that every approved build traces to source published in
+    <a href="https://github.com/BreadchainCoop/sigstack-near">the repo</a>.
+  </p>
+
+  <section aria-labelledby="h-bot">
+    <h2 id="h-bot">The registered bot</h2>
+    <div id="bot" class="card"><span class="badge pending">Loading…</span></div>
+  </section>
+
+  <section aria-labelledby="h-builds">
+    <h2 id="h-builds">Approved builds</h2>
+    <p class="note">
+      A build is identified by its compose hash: the sha256 of <code>app_compose</code>, the JSON that
+      wraps the Docker Compose file, the CVM settings and Phala's pre-launch script. dstack measures it
+      into the TDX quote. For each build the owner approved, this page downloads the published
+      <code>app_compose</code>, hashes it here, and lists the image digests it pins.
+    </p>
+    <div id="builds"><div class="card"><span class="badge pending">Loading…</span></div></div>
+  </section>
+
+  <section aria-labelledby="h-contract">
+    <h2 id="h-contract">The contract</h2>
+    <div id="contract" class="card"><span class="badge pending">Loading…</span></div>
+  </section>
+
+  <section aria-labelledby="h-agents">
+    <h2 id="h-agents">All registrations</h2>
+    <p class="note">
+      The bot generates a new key on every boot, so each restart registers a new account. Older ones stay
+      listed until they expire; anyone can prune them after that.
+    </p>
+    <div id="agents" class="card"><span class="badge pending">Loading…</span></div>
+  </section>
+
+  <section aria-labelledby="h-scope">
+    <h2 id="h-scope">What is and isn't verified</h2>
+    <div class="card">
+      <h3>Checked by the contract on NEAR, when the bot registered</h3>
+      <ul class="checks">
+        <li>The TDX quote is signed by Intel, using collateral that is in date, and the platform's TCB is up to date.</li>
+        <li>The quote's report data is the agent's own account ID, so a quote can't be reused by another account.</li>
+        <li>The firmware, OS and compose-hash measurements match a build the owner approved.</li>
+        <li>The CPU's PPID is on the owner's approved list.</li>
+      </ul>
+      <h3>Checked by this page, in your browser</h3>
+      <ul class="checks">
+        <li>Each approved compose hash is the sha256 of a published <code>app_compose</code> file.</li>
+        <li>That file pins every container image by digest.</li>
+        <li>The contract's on-chain code is the wasm built by this repo's CI.</li>
+      </ul>
+      <h3>Not verified here</h3>
+      <ul class="checks">
+        <li>
+          That each image digest was built from the stated commit. The linked <code>images</code> workflow run
+          logs the digest it pushed; rebuilding the image yourself is the stronger check.
+        </li>
+        <li>
+          That the bot you message in Signal is this agent. Send it <code>!verify &lt;random text&gt;</code> and
+          compare its compose hash with the one above (see the README).
+        </li>
+        <li>
+          The AI side. Messages are transcribed and translated by NEAR AI Cloud models running in GPU TEEs, but the
+          bot doesn't verify their attestation yet.
+        </li>
+        <li>
+          The firmware and OS measurements (MRTD, RTMR0–2) are Phala's dstack image. They're approved as published,
+          not rebuilt here.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    Reads <span class="mono" id="f-contract"></span> through <span class="mono" id="f-rpc"></span>.
+    No server of ours is involved: this is one static file, and you can
+    <a href="https://github.com/BreadchainCoop/sigstack-near/blob/main/verifier/index.html">read its source</a>.
+  </footer>
+</main>
+
+<script>
+"use strict";
+
+const CONFIG = {
+  contract: "agent.sigstack.testnet",
+  rpcs: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],
+  repo: "BreadchainCoop/sigstack-near",
+  explorer: "https://testnet.nearblocks.io",
+  // The wasm the `contract` workflow built and logged; it's what was deployed.
+  wasm: {
+    sha256: "9890b61e434341c2c2b995e71690c054edd0ed0b960da421e267771366017667",
+    commit: "66f4b004b3cab204a4924c0eb4326f729fcc0218",
+    run: 42946350559,
+  },
+  signal: "https://signal.me/#eu/SbV9bgttO6r-3Zpak8AUB3WdIeIjgLsjAShkM6lcgQPihTCX4xJIpJnTmXFW4IwW",
+};
+
+const GH = `https://github.com/${CONFIG.repo}`;
+const RAW = `https://raw.githubusercontent.com/${CONFIG.repo}/main/verifier/`;
+
+// ---------- small DOM helpers (all on-chain data goes in as text, never HTML) ----------
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v;
+    else node.setAttribute(k, v);
+  }
+  for (const child of children.flat()) {
+    if (child == null || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+const link = (href, text) => el("a", { href, rel: "noopener" }, text);
+const code = (text) => el("code", {}, text);
+const badge = (kind, text) => el("span", { class: `badge ${kind}` }, text);
+const row = (k, ...v) => el("div", { class: "row" }, el("span", { class: "k" }, k), el("span", { class: "v" }, ...v));
+const short = (hex, n = 8) => (hex.length > 2 * n ? `${hex.slice(0, n)}…${hex.slice(-4)}` : hex);
+const accountLink = (id) => link(`${CONFIG.explorer}/address/${id}`, short(id, 10));
+const commitLink = (sha) => link(`${GH}/commit/${sha}`, sha.slice(0, 7));
+const runLink = (id) => link(`${GH}/actions/runs/${id}`, `run ${id}`);
+function fill(id, ...nodes) {
+  const target = document.getElementById(id);
+  target.replaceChildren(...nodes);
+}
+function fail(id, err) {
+  fill(id, el("p", { class: "error" }, `Couldn't load this: ${err.message || err}`));
+}
+const when = (ms) =>
+  new Date(Number(ms)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "long" });
+
+// ---------- NEAR RPC ----------
+
+let rpcUsed = CONFIG.rpcs[0];
+async function rpc(method, params) {
+  let lastErr;
+  for (const url of CONFIG.rpcs) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "verifier", method, params }),
+      });
+      const body = await res.json();
+      if (body.error) throw new Error(body.error.cause?.name || body.error.message || "RPC error");
+      if (body.result?.error) throw new Error(body.result.error);
+      rpcUsed = url;
+      return body.result;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
+async function view(method, args = {}) {
+  const result = await rpc("query", {
+    request_type: "call_function",
+    finality: "final",
+    account_id: CONFIG.contract,
+    method_name: method,
+    args_base64: btoa(JSON.stringify(args)),
+  });
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(result.result)));
+}
+
+// Pages through a paginated view until a short page comes back.
+async function viewAll(method) {
+  const out = [];
+  const limit = 50;
+  for (let from = 0; ; from += limit) {
+    const page = await view(method, { from_index: from, limit });
+    out.push(...page);
+    if (page.length < limit) return out;
+  }
+}
+
+// ---------- hashing and encoding ----------
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58ToHex(s) {
+  let n = 0n;
+  for (const c of s) {
+    const i = B58.indexOf(c);
+    if (i < 0) throw new Error("bad base58");
+    n = n * 58n + BigInt(i);
+  }
+  let hex = n.toString(16);
+  if (hex.length % 2) hex = "0" + hex;
+  const leadingZeros = s.match(/^1*/)[0].length;
+  return "00".repeat(leadingZeros) + hex;
+}
+
+// Published files: from this site when served from Pages, else from the repo's main branch
+// (e.g. when the page is opened as a local file).
+async function fetchPublished(path) {
+  for (const base of ["", RAW]) {
+    try {
+      const res = await fetch(base + path, { cache: "no-cache" });
+      if (res.ok) return new Uint8Array(await res.arrayBuffer());
+    } catch (_) {
+      // try the next source
+    }
+  }
+  throw new Error(`couldn't fetch ${path}`);
+}
+
+// ---------- checks ----------
+
+async function checkBuild(composeHash, index) {
+  const entry = index.find((b) => b.compose_hash === composeHash);
+  if (!entry) return { entry: null };
+  const bytes = await fetchPublished(entry.app_compose);
+  const actual = await sha256Hex(bytes);
+  const appCompose = JSON.parse(new TextDecoder().decode(bytes));
+  const images = [...appCompose.docker_compose_file.matchAll(/^\s*image:\s*["']?([^\s"']+)/gm)].map((m) => m[1]);
+  return { entry, actual, matches: actual === composeHash, images, appCompose };
+}
+
+function imageNode(ref) {
+  const at = ref.indexOf("@sha256:");
+  const name = at >= 0 ? ref.slice(0, at) : ref;
+  const pinned = at >= 0;
+  const ghcr = name.match(/^ghcr\.io\/breadchaincoop\/(.+)$/i);
+  const nameNode = ghcr ? link(`https://github.com/orgs/BreadchainCoop/packages/container/package/${ghcr[1]}`, name) : name;
+  return el(
+    "li",
+    {},
+    nameNode,
+    " ",
+    pinned ? badge("ok", "pinned by digest") : badge("bad", "not pinned"),
+    pinned ? el("div", { class: "mono note" }, ref.slice(at + 1)) : null,
+  );
+}
+
+function renderBuild(m, check, agents) {
+  const hash = m.app_compose_hash_payload;
+  const running = agents.filter((a) => a.measurements.app_compose_hash_payload === hash && a.validity === "Valid");
+  let status;
+  if (check.error) status = badge("warn", `Couldn't check: ${check.error.message || check.error}`);
+  else if (!check.entry) status = badge("bad", "No published source for this hash");
+  else if (check.matches) status = badge("ok", "Published app_compose hashes to this");
+  else status = badge("bad", "Published file hashes to something else");
+
+  const card = el(
+    "div",
+    { class: "card" },
+    el("div", { class: "row" }, el("span", { class: "mono" }, hash), status),
+  );
+  if (check.entry) {
+    card.append(
+      el("p", { class: "note" }, check.entry.summary),
+      row("Published file", link(`${GH}/blob/main/verifier/${check.entry.app_compose}`, check.entry.app_compose.split("/").pop().slice(0, 12) + "….json")),
+      row("Images built from", commitLink(check.entry.images_commit), " by the images workflow, ", runLink(check.entry.images_run)),
+      row("Pinned in", link(`${GH}/pull/${check.entry.pinned_in_pr}`, `PR #${check.entry.pinned_in_pr}`)),
+    );
+    if (!check.matches) card.append(row("Published file's sha256", el("span", { class: "mono" }, check.actual)));
+    card.append(el("h3", { style: "margin-top:12px" }, "Container images"), el("ul", { class: "checks" }, check.images.map(imageNode)));
+  }
+  card.append(
+    row("Registered agents", running.length ? `${running.length} valid` : "none valid right now"),
+    el(
+      "details",
+      {},
+      el("summary", {}, "Firmware and OS measurements"),
+      row("MRTD", el("span", { class: "mono" }, m.rtmrs.mrtd)),
+      row("RTMR0", el("span", { class: "mono" }, m.rtmrs.rtmr0)),
+      row("RTMR1", el("span", { class: "mono" }, m.rtmrs.rtmr1)),
+      row("RTMR2", el("span", { class: "mono" }, m.rtmrs.rtmr2)),
+      row("Key provider", el("span", { class: "mono" }, m.key_provider_event_digest)),
+    ),
+  );
+  return card;
+}
+
+function validityNode(v) {
+  if (v === "Valid") return badge("ok", "Valid");
+  const reasons = (v && v.Invalid) || [];
+  return badge("bad", `Invalid: ${reasons.join(", ") || "unknown"}`);
+}
+
+async function main() {
+  document.getElementById("f-contract").textContent = CONFIG.contract;
+
+  let info, measurements, ppids, agents, index;
+  try {
+    [info, measurements, ppids, agents] = await Promise.all([
+      view("get_contract_info"),
+      viewAll("get_approved_measurements"),
+      viewAll("get_approved_ppids"),
+      viewAll("get_agents"),
+    ]);
+  } catch (e) {
+    for (const id of ["bot", "builds", "contract", "agents"]) fail(id, e);
+    return;
+  } finally {
+    document.getElementById("f-rpc").textContent = rpcUsed;
+  }
+  try {
+    index = JSON.parse(new TextDecoder().decode(await fetchPublished("builds.json")));
+  } catch (e) {
+    index = [];
+  }
+
+  // Approved builds.
+  const checks = await Promise.all(
+    measurements.map((m) => checkBuild(m.app_compose_hash_payload, index).catch((e) => ({ entry: null, error: e }))),
+  );
+  fill("builds", ...measurements.map((m, i) => renderBuild(m, checks[i], agents)));
+
+  // The bot: the valid registration that expires last is the latest boot.
+  const valid = agents.filter((a) => a.validity === "Valid").sort((a, b) => Number(b.valid_until_ms) - Number(a.valid_until_ms));
+  const current = valid[0];
+  if (!current) {
+    fill("bot", badge("warn", "No valid registration right now"), el("p", { class: "note" }, "The bot may be restarting; it re-registers on boot."));
+  } else {
+    const hash = current.measurements.app_compose_hash_payload;
+    const i = measurements.findIndex((m) => m.app_compose_hash_payload === hash);
+    const check = checks[i] || {};
+    fill(
+      "bot",
+      el("div", { class: "row" }, badge("ok", "Registered and valid"), check.matches ? badge("ok", "Build traces to published source") : badge("bad", "Build has no matching published source")),
+      row("Agent account", accountLink(current.account_id)),
+      row("Valid until", when(current.valid_until_ms)),
+      row("Compose hash", el("span", { class: "mono" }, hash)),
+      row("PPID", el("span", { class: "mono" }, current.ppid)),
+      el(
+        "p",
+        { style: "margin-top:12px" },
+        "To check you're talking to this bot, ",
+        link(CONFIG.signal, "open it in Signal"),
+        " and send ",
+        code("!verify <random text>"),
+        ". Its reply should show this compose hash, and its quote should verify on ",
+        link("https://proof.t16z.com", "proof.t16z.com"),
+        ".",
+      ),
+    );
+  }
+
+  // Registrations.
+  const sorted = [...agents].sort((a, b) => Number(b.valid_until_ms) - Number(a.valid_until_ms));
+  fill(
+    "agents",
+    sorted.length
+      ? el(
+          "div",
+          { class: "table-wrap" },
+          el(
+            "table",
+            {},
+            el("thead", {}, el("tr", {}, el("th", {}, "Agent account"), el("th", {}, "Status"), el("th", {}, "Valid until"), el("th", {}, "Build"))),
+            el(
+              "tbody",
+              {},
+              sorted.map((a) =>
+                el(
+                  "tr",
+                  {},
+                  el("td", {}, accountLink(a.account_id)),
+                  el("td", {}, validityNode(a.validity)),
+                  el("td", {}, when(a.valid_until_ms)),
+                  el("td", { class: "mono" }, short(a.measurements.app_compose_hash_payload)),
+                ),
+              ),
+            ),
+          ),
+        )
+      : el("p", {}, "No agents are registered."),
+  );
+
+  // The contract itself.
+  let codeRow;
+  try {
+    const account = await rpc("query", { request_type: "view_account", finality: "final", account_id: CONFIG.contract });
+    const onchain = base58ToHex(account.code_hash);
+    codeRow = row(
+      "Code",
+      onchain === CONFIG.wasm.sha256 ? badge("ok", "Matches the CI-built wasm") : badge("bad", "Doesn't match the CI-built wasm"),
+      el("div", { class: "note" }, "On-chain code hash ", el("span", { class: "mono" }, account.code_hash), " is sha256 ", el("span", { class: "mono" }, onchain), "."),
+      el("div", { class: "note" }, "CI built ", el("span", { class: "mono" }, CONFIG.wasm.sha256), " from ", commitLink(CONFIG.wasm.commit), " in ", runLink(CONFIG.wasm.run), "."),
+    );
+  } catch (e) {
+    codeRow = row("Code", el("span", { class: "error" }, `Couldn't load: ${e.message}`));
+  }
+  fill(
+    "contract",
+    row("Account", link(`${CONFIG.explorer}/address/${CONFIG.contract}`, CONFIG.contract)),
+    row("Owner", link(`${CONFIG.explorer}/address/${info.owner_id}`, info.owner_id), el("div", { class: "note" }, "Only the owner can approve builds and PPIDs.")),
+    row("Requires a TEE", info.requires_tee ? badge("ok", "Yes: real TDX quotes only") : badge("bad", "No: local test mode")),
+    row("Registration lasts", `${Math.round(Number(info.attestation_expiration_time_ms) / 86_400_000)} days`),
+    row("Approved PPIDs", ...ppids.map((p) => el("div", { class: "mono" }, p))),
+    codeRow,
+    el("p", { class: "note", style: "margin-top:12px" }, "Source: ", link(`${GH}/tree/main/contracts/agent`, "contracts/agent"), ", adapted from NEAR's shade-agent-framework contract template."),
+  );
+}
+
+main();
+</script>
+</body>
+</html>

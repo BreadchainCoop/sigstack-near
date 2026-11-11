@@ -1,73 +1,64 @@
 name: Pages
 
+# Publishes the verifier page (verifier/) to this repo's GitHub Pages. The marketing site in
+# site/ is hosted from the production sigstack-bot repo, not from here.
+
 on:
   push:
     branches: [main]
     paths:
-      - 'site/**'
+      - 'verifier/**'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'verifier/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: site/package-lock.json
-      - run: npm ci
-      - run: npm run build
-        env:
-          BASE_PATH: /sigstack-bot/sigstack
-          PUBLIC_SIGNAL_USERNAME_TOKEN: ${{ vars.PUBLIC_SIGNAL_USERNAME_TOKEN }}
-          PUBLIC_STRIPE_PORTAL_URL: ${{ vars.PUBLIC_STRIPE_PORTAL_URL }}
-          PUBLIC_COMMERCE_API_BASE_URL: ${{ vars.PUBLIC_COMMERCE_API_BASE_URL }}
-      - name: Prepare Pages artifact for /sigstack-bot/sigstack
-        shell: bash
+      - name: Published builds hash to their compose hashes
+        run: python3 verifier/check_builds.py
+      - name: Page script parses
         run: |
-          set -euo pipefail
-
-          # The GitHub Pages project site mounts the artifact at `/<repo>/`.
-          # Nest the SvelteKit output under `sigstack/` so /sigstack-bot/sigstack/
-          # resolves. Move the whole build dir (avoids overlapping hidden-file globs).
-          tmp="$(mktemp -d)"
-          mv build "$tmp/sigstack"
-          mkdir -p build
-          mv "$tmp/sigstack" build/sigstack
-          printf '%s\n' '<!doctype html>' \
-            '<meta http-equiv="refresh" content="0; url=/sigstack-bot/sigstack/">' \
-            > build/index.html
-          # Keep old /cypherslate/ bookmarks working.
-          mkdir -p build/cypherslate
-          printf '%s\n' '<!doctype html>' \
-            '<meta http-equiv="refresh" content="0; url=/sigstack-bot/sigstack/">' \
-            > build/cypherslate/index.html
-          touch build/.nojekyll
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site/build
+          python3 - <<'EOF'
+          import pathlib
+          html = pathlib.Path("verifier/index.html").read_text()
+          start = html.index("<script>") + len("<script>")
+          pathlib.Path("/tmp/verifier.js").write_text(html[start:html.rindex("</script>")])
+          EOF
+          node --check /tmp/verifier.js
 
   deploy:
-    needs: build
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp -r verifier/index.html verifier/builds.json verifier/builds _site/
+          touch _site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
