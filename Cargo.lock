@@ -1351,6 +1351,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "near-agent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.21.7",
+ "dstack-client",
+ "hex",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
 name = "near-ai-client"
 version = "0.1.0"
 dependencies = [
@@ -2101,6 +2120,7 @@ dependencies = [
  "hex",
  "humantime-serde",
  "mockall",
+ "near-agent",
  "near-ai-client",
  "rand 0.8.5",
  "serde",

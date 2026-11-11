@@ -252,6 +252,7 @@ mod tests {
                 storage_path: "/tmp/sigstack-bot-test-entitlements.enc".into(),
                 ..Default::default()
             },
+            agent: Default::default(),
         }
     }
 

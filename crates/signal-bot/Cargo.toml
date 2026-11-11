@@ -17,6 +17,7 @@ signal-bot-core = { path = "../signal-bot-core" }
 signal-bot-voice = { path = "../signal-bot-voice" }
 near-ai-client = { path = "../near-ai-client" }
 dstack-client = { path = "../dstack-client" }
+near-agent = { path = "../near-agent" }
 signal-client = { path = "../signal-client" }
 whisper-client = { path = "../whisper-client" }
 

@@ -53,6 +53,15 @@ services:
       - ENTITLEMENTS__PERSIST=true
       - ENTITLEMENTS__STORAGE_PATH=/data/entitlements.enc
       - ENTITLEMENTS__ENFORCE=false
+      # Agent contract registration: each boot generates a key in TEE memory, the
+      # sponsor funds its implicit account, and the bot registers its attestation.
+      # Set AGENT__CONTRACT_ID here (not in env) once the contract is deployed, so
+      # the compose hash pins which contract the bot registers with.
+      # - AGENT__CONTRACT_ID=
+      - AGENT__RPC_URL=https://test.rpc.fastnear.com
+      - AGENT__PCCS_URLS=https://pccs.phala.network,https://api.trustedservices.intel.com
+      - AGENT__SPONSOR_ACCOUNT_ID=${AGENT_SPONSOR_ACCOUNT_ID}
+      - AGENT__SPONSOR_PRIVATE_KEY=${AGENT_SPONSOR_PRIVATE_KEY}
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock:ro
       - group-prefs-translation:/data
