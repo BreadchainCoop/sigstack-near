@@ -227,14 +227,10 @@ pub(crate) mod tests {
         let tee = FakeTee::new();
         let report_data = [5u8; 64];
 
-        let attestation = build_attestation(
-            &tee,
-            &reqwest::Client::new(),
-            &[server.uri()],
-            &report_data,
-        )
-        .await
-        .unwrap();
+        let attestation =
+            build_attestation(&tee, &reqwest::Client::new(), &[server.uri()], &report_data)
+                .await
+                .unwrap();
 
         assert_eq!(*tee.quoted.lock().unwrap(), vec![report_data]);
         let quote: Vec<u8> = serde_json::from_value(attestation["quote"].clone()).unwrap();

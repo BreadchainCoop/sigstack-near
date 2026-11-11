@@ -31,12 +31,9 @@ impl NearRpc {
     }
 
     /// `Ok(Err(error))` is a JSON-RPC error object, left to the caller to classify.
-    async fn call(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> Result<Result<Value, Value>, AgentError> {
-        let body = json!({ "jsonrpc": "2.0", "id": "sigstack", "method": method, "params": params });
+    async fn call(&self, method: &str, params: Value) -> Result<Result<Value, Value>, AgentError> {
+        let body =
+            json!({ "jsonrpc": "2.0", "id": "sigstack", "method": method, "params": params });
         let response: Value = self
             .http
             .post(&self.url)
@@ -233,8 +230,14 @@ mod tests {
                 block_hash: hash
             })
         );
-        assert_eq!(rpc.access_key("b.testnet", "ed25519:x").await.unwrap(), None);
-        assert_eq!(rpc.access_key("c.testnet", "ed25519:x").await.unwrap(), None);
+        assert_eq!(
+            rpc.access_key("b.testnet", "ed25519:x").await.unwrap(),
+            None
+        );
+        assert_eq!(
+            rpc.access_key("c.testnet", "ed25519:x").await.unwrap(),
+            None
+        );
     }
 
     #[tokio::test]
@@ -395,7 +398,12 @@ mod tests {
             json!({ "jsonrpc": "2.0", "id": "sigstack", "error": { "name": "REQUEST_VALIDATION_ERROR" } }),
         )
         .await;
-        respond(&server, tx(5), json!({ "jsonrpc": "2.0", "id": "sigstack" })).await;
+        respond(
+            &server,
+            tx(5),
+            json!({ "jsonrpc": "2.0", "id": "sigstack" }),
+        )
+        .await;
 
         let rpc = NearRpc::new(server.uri()).unwrap();
         rpc.send_tx(&signed(1)).await.unwrap();

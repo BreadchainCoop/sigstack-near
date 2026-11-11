@@ -164,8 +164,7 @@ async fn fetch_from(
     )
     .await?;
     let qe_identity_issuer_chain = response.header(&["SGX-Enclave-Identity-Issuer-Chain"])?;
-    let (qe_identity, qe_identity_signature) =
-        split_signed(&response.text()?, "enclaveIdentity")?;
+    let (qe_identity, qe_identity_signature) = split_signed(&response.text()?, "enclaveIdentity")?;
 
     let root_ca_crl = match root_ca_crl_source(base) {
         RootCaCrl::PccsHex(url) => {
@@ -309,7 +308,10 @@ pub(crate) mod tests {
         let err = fetch_collateral(&reqwest::Client::new(), &[server.uri()], &quote)
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("SGX-PCK-CRL-Issuer-Chain"), "{err}");
+        assert!(
+            err.to_string().contains("SGX-PCK-CRL-Issuer-Chain"),
+            "{err}"
+        );
     }
 
     #[test]

@@ -110,7 +110,10 @@ mod tests {
         assert_eq!(key.implicit_account_id(), RFC_PUBLIC);
         assert_eq!(
             key.public_key_string(),
-            format!("ed25519:{}", base58::encode(&hex::decode(RFC_PUBLIC).unwrap()))
+            format!(
+                "ed25519:{}",
+                base58::encode(&hex::decode(RFC_PUBLIC).unwrap())
+            )
         );
     }
 
@@ -142,7 +145,10 @@ mod tests {
         let seed = rfc_seed();
         let public = hex::decode(RFC_PUBLIC).unwrap();
 
-        let full = format!("ed25519:{}", base58::encode(&[&seed[..], &public[..]].concat()));
+        let full = format!(
+            "ed25519:{}",
+            base58::encode(&[&seed[..], &public[..]].concat())
+        );
         let key = SigningKey::from_near_secret(&full).unwrap();
         assert_eq!(key.implicit_account_id(), RFC_PUBLIC);
 

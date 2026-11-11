@@ -92,7 +92,9 @@ impl Registrar {
             .rpc
             .access_key(signer_id, &public_key)
             .await?
-            .ok_or_else(|| AgentError::Rpc(format!("{signer_id} has no access key {public_key}")))?;
+            .ok_or_else(|| {
+                AgentError::Rpc(format!("{signer_id} has no access key {public_key}"))
+            })?;
         let signed = Transaction {
             signer_id: signer_id.to_string(),
             public_key: key.public_key(),
@@ -179,7 +181,9 @@ impl Registrar {
             .and_then(|view| view.get("valid_until_ms").cloned())
             .and_then(|v| v.as_str().and_then(|s| s.parse().ok()))
             .ok_or_else(|| {
-                AgentError::Rpc(format!("get_agent has no valid_until_ms after tx {tx_hash}"))
+                AgentError::Rpc(format!(
+                    "get_agent has no valid_until_ms after tx {tx_hash}"
+                ))
             })?;
         Ok(Registration {
             account_id,
@@ -431,11 +435,17 @@ mod tests {
             })),
         )
         .await;
-        let registrar =
-            Registrar::with_key(&cfg, f.tee.clone(), SigningKey::from_seed(&AGENT_SEED).unwrap())
-                .unwrap();
+        let registrar = Registrar::with_key(
+            &cfg,
+            f.tee.clone(),
+            SigningKey::from_seed(&AGENT_SEED).unwrap(),
+        )
+        .unwrap();
         let err = registrar.ensure_funded().await.unwrap_err();
-        assert!(err.to_string().contains("nobody.testnet has no access key"), "{err}");
+        assert!(
+            err.to_string().contains("nobody.testnet has no access key"),
+            "{err}"
+        );
     }
 
     #[test]

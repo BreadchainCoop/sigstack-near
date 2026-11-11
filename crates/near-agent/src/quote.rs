@@ -135,7 +135,9 @@ fn fmspc(cert: &[u8]) -> Result<[u8; 6], AgentError> {
     // OCTET STRING of 6 bytes.
     match cert.get(at + FMSPC_OID.len()..at + FMSPC_OID.len() + 8) {
         Some([0x04, 0x06, rest @ ..]) => Ok(rest.try_into().unwrap()),
-        _ => Err(AgentError::Quote("PCK certificate FMSPC is malformed".into())),
+        _ => Err(AgentError::Quote(
+            "PCK certificate FMSPC is malformed".into(),
+        )),
     }
 }
 
@@ -199,7 +201,12 @@ pub(crate) mod tests {
 
     /// A v4 TDX quote whose certification data is a QE report wrapping a PCK chain.
     pub(crate) fn tdx_quote(issuer: &str) -> Vec<u8> {
-        quote_with(4, TDX_TEE_TYPE, true, &pem(&[fake_cert(issuer), vec![1, 2, 3]]))
+        quote_with(
+            4,
+            TDX_TEE_TYPE,
+            true,
+            &pem(&[fake_cert(issuer), vec![1, 2, 3]]),
+        )
     }
 
     fn quote_with(version: u16, tee_type: u32, wrap_in_qe_report: bool, chain: &[u8]) -> Vec<u8> {

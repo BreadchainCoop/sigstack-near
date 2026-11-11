@@ -148,7 +148,11 @@ fn default_top_up_balance() -> String {
 }
 
 fn default_pccs_urls() -> String {
-    format!("{},{}", collateral::PHALA_PCCS_URL, collateral::INTEL_PCS_URL)
+    format!(
+        "{},{}",
+        collateral::PHALA_PCCS_URL,
+        collateral::INTEL_PCS_URL
+    )
 }
 
 #[cfg(test)]
