@@ -88,6 +88,10 @@ pub struct BotConfig {
     #[serde(default)]
     pub github_repo: Option<String>,
 
+    /// Public page listing the approved builds; `!verify` links it.
+    #[serde(default)]
+    pub verifier_url: Option<String>,
+
     /// Log level
     #[serde(default = "default_log_level")]
     pub log_level: String,
@@ -193,6 +197,7 @@ impl Default for BotConfig {
         Self {
             signal_username: Some(default_signal_username()),
             github_repo: None,
+            verifier_url: None,
             log_level: default_log_level(),
         }
     }

@@ -155,19 +155,19 @@ on a device with Signal, or search for the username `sigstackdemo.98`. The demo 
 subscription; every command is open.
 
 To check you're talking to the attested bot, send `!verify <random text>`, e.g. `!verify k3v9-pear`.
-The reply has:
+The bot answers with two messages. The first has:
 
-- **Your Challenge:** `Sigstack: k3v9-pear`. The bot prefixes your text, then puts it in the
+- **Your challenge:** `Sigstack: k3v9-pear`. The bot prefixes your text, then puts it in the
   quote's report data.
-- **Report Data (hex):** the challenge in hex. Check it with
-  `printf 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
-- **Compose Hash:** should be `a949c1ff…507d`, the same as above.
-- **TDX Quote:** paste it into [proof.t16z.com](https://proof.t16z.com). It checks the Intel
-  signature. Its report data should be your hex, zero-padded to 64 bytes. A fresh challenge in
-  a genuine quote proves the reply came from inside the TEE just now.
+- **Report data:** the challenge in hex. Check it with
+  `printf '%s' 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
+- **Compose hash:** should be `a949c1ff…507d`, the same as above.
+- **How to verify:** the same three checks as here, with links to the verifier page and this repo.
 
-Ignore step 3 of the reply's own "How to Verify". It's inherited from the upstream bot and
-names the upstream repo and file. The checks above replace it.
+The second message is the TDX quote alone. Long-press it, copy it, and paste it into
+[proof.t16z.com](https://proof.t16z.com). It checks the Intel signature. Its report data
+should be your hex, zero-padded to 64 bytes. A fresh challenge in a genuine quote proves the
+reply came from inside the TEE just now.
 
 Then try the product:
 

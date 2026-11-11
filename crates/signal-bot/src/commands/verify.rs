@@ -6,9 +6,27 @@ use async_trait::async_trait;
 use dstack_client::DstackClient;
 use hex;
 use sha2::{Digest, Sha256};
+use signal_bot_core::REPLY_BREAK;
 use signal_client::BotMessage;
 use std::sync::Arc;
 use tracing::info;
+
+// Reply text, sent with Signal text styles (`**bold**`, `*italic*`, `` `mono` ``).
+const HASHED_NOTE: &str = "*Over 64 bytes, so the quote holds its SHA-256 hash.*";
+const NO_CHALLENGE_NOTE: &str = "*Send !verify <random text> so the quote proves it's fresh.*";
+const HEX_CHECK: &str = "Check: `printf '%s' 'Sigstack: <your text>' | xxd -p`";
+const HASH_CHECK: &str = "Check: `printf '%s' 'Sigstack: <your text>' | sha256sum`";
+const HOW_TO_VERIFY: &str = "\
+**How to verify**
+1. **Signature:** copy the quote from the next message and paste it into \
+https://proof.t16z.com. It checks that Intel signed it.
+2. **Freshness:** the quote's report data must be the hex above, padded with zeros to \
+64 bytes. Only code in this TEE could have quoted your challenge.
+3. **Code:** the compose hash must be one the agent contract approved before this bot \
+could register.";
+const NEAR_AI_NOTE: &str = "\
+**NEAR AI:** transcription and translation run on NEAR AI Cloud's GPU TEEs. Verify them \
+at https://docs.near.ai/cloud/verification/";
 
 /// Operator addresses for fund sweeping (from payment config).
 #[derive(Debug, Clone, Default)]
@@ -32,6 +50,10 @@ pub struct VerifyHandler {
     dstack: Arc<DstackClient>,
     /// Optional operator addresses to display.
     operator_addresses: Option<OperatorAddresses>,
+    /// Where the source lives (`BOT__GITHUB_REPO`).
+    repo_url: Option<String>,
+    /// Page listing approved builds (`BOT__VERIFIER_URL`).
+    verifier_url: Option<String>,
 }
 
 impl VerifyHandler {
@@ -39,7 +61,18 @@ impl VerifyHandler {
         Self {
             dstack,
             operator_addresses: None,
+            repo_url: None,
+            verifier_url: None,
         }
+    }
+
+    /// Links the reply's code check to the source repo and the verifier page. Blank
+    /// values are ignored.
+    pub fn with_links(mut self, repo_url: Option<String>, verifier_url: Option<String>) -> Self {
+        let present = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+        self.repo_url = present(repo_url);
+        self.verifier_url = present(verifier_url);
+        self
     }
 
     /// Create handler with operator addresses to display.
@@ -50,6 +83,8 @@ impl VerifyHandler {
         Self {
             dstack,
             operator_addresses: Some(addresses),
+            repo_url: None,
+            verifier_url: None,
         }
     }
 
@@ -158,108 +193,81 @@ impl VerifyHandler {
             return lines.join("\n");
         }
 
-        lines.push("**🔐 TEE Attestation**".into());
+        lines.push("**🔐 TEE attestation**".into());
         lines.push(String::new());
 
-        // Challenge confirmation
-        if let Some(challenge) = &result.challenge {
-            lines.push(format!("**Your Challenge:** {}", challenge));
-            if result.was_hashed {
-                lines.push("_Note: Challenge was >64 bytes, so it was hashed with SHA-256_".into());
+        match &result.challenge {
+            Some(challenge) => {
+                lines.push(format!("**Your challenge:** {challenge}"));
+                if result.was_hashed {
+                    lines.push(HASHED_NOTE.into());
+                }
             }
-        } else {
-            lines.push("**Your Challenge:** (none provided)".into());
-            lines.push("_Tip: Use `!verify <your-random-text>` for cryptographic proof_".into());
+            None => {
+                lines.push("**Your challenge:** none".into());
+                lines.push(NO_CHALLENGE_NOTE.into());
+            }
         }
-        lines.push(String::new());
-
-        // Report data (what's actually in the quote)
         if let Some(report_data_hex) = &result.report_data_hex {
-            lines.push("**Report Data (hex):**".into());
-            lines.push(format!("```\n{}\n```", report_data_hex));
-            if result.was_hashed {
-                lines.push("_This is the SHA-256 hash of your challenge._".into());
+            lines.push(format!("**Report data:** `{report_data_hex}`"));
+            let check = if result.was_hashed {
+                HASH_CHECK
             } else {
-                lines.push("_This is your challenge encoded in hex._".into());
-            }
-            lines.push(String::new());
+                HEX_CHECK
+            };
+            lines.push(check.into());
         }
-
-        // App info
-        lines.push("**TEE Info:**".into());
+        lines.push(String::new());
         if let Some(hash) = &result.compose_hash {
-            lines.push(format!("- Compose Hash: {}", hash));
+            lines.push(format!("**Compose hash:** `{hash}`"));
         }
         if let Some(id) = &result.app_id {
-            lines.push(format!("- App ID: {}", id));
+            lines.push(format!("**App ID:** `{id}`"));
         }
-        lines.push(String::new());
 
-        // Quote
-        if let Some(quote) = &result.quote {
-            lines.push("**TDX Quote (base64):**".into());
-            lines.push("```".into());
-            // Split quote into chunks for readability (Signal might have message limits)
-            for chunk in quote.as_bytes().chunks(64) {
-                lines.push(String::from_utf8_lossy(chunk).to_string());
+        if result.quote.is_some() {
+            lines.push(String::new());
+            lines.push(HOW_TO_VERIFY.into());
+            if let Some(url) = &self.verifier_url {
+                lines.push(format!("   Approved builds, traced to source: {url}"));
             }
-            lines.push("```".into());
-            lines.push(String::new());
-
-            lines.push("**How to Verify:**".into());
-            lines.push("1. **Verify Report Data:** The report_data field in the quote should match the hex value above".into());
-            if result.was_hashed {
-                lines.push("   - Since your challenge was >64 bytes, verify: `echo -n '<your-challenge>' | sha256sum`".into());
-            } else {
-                lines.push("   - To verify: `echo -n '<your-challenge>' | xxd -p`".into());
+            if let Some(repo) = &self.repo_url {
+                lines.push(format!("   Source: {repo}"));
             }
-            lines.push(String::new());
-
-            lines.push("2. **Verify Quote Signature:** Use the TEE Attestation Explorer".into());
-            lines.push("   - Go to: https://proof.t16z.com".into());
-            lines.push("   - Paste the TDX quote (hex format) or upload as binary".into());
-            lines.push("   - The quote signature is verified against Intel TDX hardware".into());
-            lines.push(String::new());
-
-            lines.push("3. **Verify Docker Compose:** Check that compose_hash matches the expected configuration".into());
-            lines.push("   - Repository: https://github.com/zmanian/signal-bot-tee".into());
-            lines.push(
-                "   - Compare the compose_hash above with: `sha256sum docker/phala.yaml`".into(),
-            );
-            lines.push("   - This proves the bot is running the expected code".into());
         } else if let Some(err) = &result.error {
-            lines.push(format!("**Quote Error:** {}", err));
+            lines.push(String::new());
+            lines.push(format!("**Quote error:** {err}"));
         }
 
-        // Operator addresses for fund sweeping
         if let Some(ref addresses) = result.operator_addresses {
             if addresses.has_any() {
                 lines.push(String::new());
-                lines.push("**Operator Fund Addresses:**".into());
+                lines.push("**Operator fund addresses:**".into());
                 if let Some(ref addr) = addresses.base {
-                    lines.push(format!("- Base: `{}`", addr));
+                    lines.push(format!("- Base: `{addr}`"));
                 }
                 if let Some(ref addr) = addresses.near {
-                    lines.push(format!("- NEAR: `{}`", addr));
+                    lines.push(format!("- NEAR: `{addr}`"));
                 }
                 if let Some(ref addr) = addresses.solana {
-                    lines.push(format!("- Solana: `{}`", addr));
+                    lines.push(format!("- Solana: `{addr}`"));
                 }
                 lines.push(String::new());
-                lines.push("_Deposits are automatically swept to these addresses._".into());
-                lines.push(
-                    "_Verify these match the expected operator by checking the compose hash._"
-                        .into(),
-                );
+                lines.push("*Deposits are automatically swept to these addresses.*".into());
+                lines.push("*Confirm them against the compose hash.*".into());
             }
         }
 
         lines.push(String::new());
-        lines.push(
-            "**NEAR AI:** Verify separately at https://docs.near.ai/cloud/verification/".into(),
-        );
+        lines.push(NEAR_AI_NOTE.into());
 
-        lines.join("\n")
+        // The quote goes out as its own message, one unbroken hex string, so it copies whole.
+        let mut reply = lines.join("\n");
+        if let Some(quote) = &result.quote {
+            reply.push(REPLY_BREAK);
+            reply.push_str(quote);
+        }
+        reply
     }
 }
 
@@ -280,6 +288,10 @@ struct AttestationResult {
 impl CommandHandler for VerifyHandler {
     fn trigger(&self) -> Option<&str> {
         Some("!verify")
+    }
+
+    fn styled_reply(&self) -> bool {
+        true
     }
 
     fn matches(&self, message: &BotMessage) -> bool {
@@ -387,7 +399,7 @@ mod tests {
 
         let response = handler.format_response(result);
         assert!(response.contains(&expected_hex));
-        assert!(response.contains("This is your challenge encoded in hex"));
+        assert!(response.contains("xxd -p"));
         assert!(!response.contains("SHA-256"));
     }
 
@@ -418,7 +430,8 @@ mod tests {
         let response = handler.format_response(result);
         assert!(response.contains(&expected_hex));
         assert!(response.contains("SHA-256 hash"));
-        assert!(response.contains("was >64 bytes"));
+        assert!(response.contains("Over 64 bytes"));
+        assert!(response.contains("sha256sum"));
     }
 
     #[test]
@@ -440,12 +453,12 @@ mod tests {
         };
 
         let response = handler.format_response(result);
-        assert!(response.contains("TEE Attestation"));
+        assert!(response.contains("TEE attestation"));
         assert!(response.contains("my-nonce"));
         assert!(response.contains("abc123"));
         assert!(response.contains("base64quote"));
         assert!(response.contains(&report_data_hex));
-        assert!(response.contains("Report Data"));
+        assert!(response.contains("Report data"));
     }
 
     #[test]
@@ -461,8 +474,8 @@ mod tests {
         };
 
         let response = handler.format_response(result);
-        assert!(response.contains("(none provided)"));
-        assert!(response.contains("Tip:"));
+        assert!(response.contains("**Your challenge:** none"));
+        assert!(response.contains("!verify <random text>"));
     }
 
     #[test]
@@ -481,13 +494,81 @@ mod tests {
         };
 
         let response = handler.format_response(result);
-        assert!(response.contains("How to Verify:"));
-        assert!(response.contains("Verify Report Data"));
-        assert!(response.contains("Verify Quote Signature"));
-        assert!(response.contains("Verify Docker Compose"));
+        assert!(response.contains("How to verify"));
+        assert!(response.contains("**Signature:**"));
+        assert!(response.contains("**Freshness:**"));
+        assert!(response.contains("**Code:**"));
         assert!(response.contains("https://proof.t16z.com"));
-        assert!(response.contains("https://github.com/zmanian/signal-bot-tee"));
         assert!(response.contains("xxd -p"));
+        // Nothing from the upstream bot, and only Signal's styled-text syntax.
+        assert!(!response.contains("zmanian"));
+        assert!(!response.contains("phala.yaml"));
+        assert!(!response.contains("```"));
+        assert!(!response.contains("\n_"));
+        // No links unless configured.
+        assert!(!response.contains("Source:"));
+    }
+
+    // The quote goes out alone, after the explanation, as one unbroken string.
+    #[test]
+    fn quote_is_sent_as_its_own_message() {
+        let handler = create_test_handler();
+        let quote = "04000200".repeat(40);
+        let result = AttestationResult {
+            in_tee: true,
+            compose_hash: Some("abc123".into()),
+            quote: Some(quote.clone()),
+            challenge: Some("c".into()),
+            report_data_hex: Some(hex::encode("c")),
+            ..Default::default()
+        };
+
+        let response = handler.format_response(result);
+        let parts: Vec<&str> = response.split(REPLY_BREAK).collect();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].contains("next message"));
+        assert!(!parts[0].contains(&quote));
+        assert_eq!(parts[1], quote);
+        assert!(handler.styled_reply());
+    }
+
+    // Without a quote there's nothing to send separately.
+    #[test]
+    fn quote_error_is_a_single_message() {
+        let handler = create_test_handler();
+        let result = AttestationResult {
+            in_tee: true,
+            compose_hash: Some("abc123".into()),
+            error: Some("socket closed".into()),
+            report_data_hex: Some(hex::encode("c")),
+            ..Default::default()
+        };
+
+        let response = handler.format_response(result);
+        assert!(!response.contains(REPLY_BREAK));
+        assert!(response.contains("**Quote error:** socket closed"));
+    }
+
+    // The code check links the verifier page and source when configured; blanks are ignored.
+    #[test]
+    fn code_check_links_verifier_and_source() {
+        let handler = create_test_handler().with_links(
+            Some("https://github.com/example/repo".into()),
+            Some("https://example.github.io/repo/".into()),
+        );
+        let result = AttestationResult {
+            in_tee: true,
+            compose_hash: Some("abc123".into()),
+            quote: Some("00".into()),
+            ..Default::default()
+        };
+        let response = handler.format_response(result);
+        assert!(response.contains("traced to source: https://example.github.io/repo/"));
+        assert!(response.contains("Source: https://github.com/example/repo"));
+
+        let blank = create_test_handler().with_links(Some(" ".into()), None);
+        assert!(blank.repo_url.is_none());
+        assert!(blank.verifier_url.is_none());
     }
 
     #[test]
@@ -514,7 +595,7 @@ mod tests {
         };
 
         let response = handler.format_response(result);
-        assert!(response.contains("Operator Fund Addresses"));
+        assert!(response.contains("Operator fund addresses"));
         assert!(response.contains("0xABC123"));
         assert!(response.contains("operator.near"));
         assert!(response.contains("swept to these addresses"));

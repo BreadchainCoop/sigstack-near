@@ -59,6 +59,10 @@ impl CommandHandler for TranslateLangsHandler {
         "translate_langs"
     }
 
+    fn styled_reply(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, _message: &BotMessage) -> AppResult<String> {
         Ok(format!(
             "**Language Threads & manual translate** (use code with !translate-me-thread or quote !translate):\n\n{}\n\n\
@@ -94,6 +98,10 @@ impl CommandHandler for TranslateLangsInChatHandler {
 
     fn label(&self) -> &'static str {
         "translate_langs_in_chat"
+    }
+
+    fn styled_reply(&self) -> bool {
+        true
     }
 
     async fn execute(&self, _message: &BotMessage) -> AppResult<String> {
@@ -213,5 +221,11 @@ mod tests {
         assert!(out.contains("es"));
         assert!(!out.contains(" eu "));
         assert!(!out.contains("Basque"));
+    }
+
+    #[test]
+    fn language_lists_are_styled() {
+        assert!(TranslateLangsHandler::new().styled_reply());
+        assert!(TranslateLangsInChatHandler::new().styled_reply());
     }
 }

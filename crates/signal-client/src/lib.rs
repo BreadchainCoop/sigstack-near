@@ -303,6 +303,55 @@ mod tests {
             .unwrap();
     }
 
+    // Styled sends set text_mode; plain sends leave it out, as before styled mode existed.
+    #[tokio::test]
+    async fn styled_replies_set_text_mode() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v2/send"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let original = BotMessage {
+            source: "+14155551234".into(),
+            source_number: None,
+            source_name: None,
+            text: "!verify".into(),
+            timestamp: 2,
+            message_timestamp: 1,
+            is_group: false,
+            group_id: None,
+            group_name: None,
+            receiving_account: "+15555555555".into(),
+            attachments: vec![],
+            quote: None,
+        };
+        client
+            .reply_with_mode(&original, "**a**", TextMode::Styled)
+            .await
+            .unwrap();
+        client
+            .reply_quoted_with_mode(&original, "**b**", None, TextMode::Styled)
+            .await
+            .unwrap();
+        client.reply(&original, "c").await.unwrap();
+
+        let bodies: Vec<serde_json::Value> = mock_server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect();
+        assert_eq!(bodies.len(), 3);
+        assert_eq!(bodies[0]["text_mode"], "styled");
+        assert_eq!(bodies[1]["text_mode"], "styled");
+        assert_eq!(bodies[1]["quote_timestamp"], 1);
+        assert!(bodies[2].get("text_mode").is_none());
+    }
+
     #[tokio::test]
     async fn test_resolve_send_recipient_group() {
         let mock_server = MockServer::start().await;

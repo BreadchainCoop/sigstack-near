@@ -202,7 +202,10 @@ pub async fn build_handlers(
         bot_username,
     )));
     handlers.push(Box::new(CommandsHandler::new(group_prefs.clone())));
-    handlers.push(Box::new(VerifyHandler::new(dstack.clone())));
+    handlers.push(Box::new(VerifyHandler::new(dstack.clone()).with_links(
+        config.bot.github_repo.clone(),
+        config.bot.verifier_url.clone(),
+    )));
     handlers.push(Box::new(HelpHandler::new()));
     handlers.push(Box::new(InfoHandler::new(group_prefs)));
     handlers.push(Box::new(PrivacyHandler::new()));

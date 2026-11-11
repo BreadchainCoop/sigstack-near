@@ -9,4 +9,4 @@ pub use command_match::{
     normalize_token, starts_with_word, starts_with_word_any, strip_prefix_list, strip_word_prefix,
 };
 pub use error::{AppError, AppResult};
-pub use handler::CommandHandler;
+pub use handler::{CommandHandler, REPLY_BREAK};

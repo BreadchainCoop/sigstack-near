@@ -4,6 +4,10 @@ use crate::error::AppResult;
 use async_trait::async_trait;
 use signal_client::BotMessage;
 
+/// Separates messages in a handler's reply: dispatch sends each part as its own Signal
+/// message, in order. For example, `!verify` sends its quote alone so it copies in one piece.
+pub const REPLY_BREAK: char = '\u{1e}';
+
 /// Command handler trait.
 #[async_trait]
 pub trait CommandHandler: Send + Sync {
@@ -36,6 +40,13 @@ pub trait CommandHandler: Send + Sync {
 
     /// When true, the handler sends its own Signal reply in `execute` (main loop skips send).
     fn handles_own_reply(&self) -> bool {
+        false
+    }
+
+    /// When true, the reply is sent with Signal text styles: `**bold**`, `*italic*` and
+    /// `` `monospace` ``. Only for replies the bot writes itself; user or model text could
+    /// contain the markers.
+    fn styled_reply(&self) -> bool {
         false
     }
 
@@ -112,6 +123,7 @@ mod tests {
         assert_eq!(h.label(), "command");
         assert!(!h.reply_with_quote());
         assert!(!h.handles_own_reply());
+        assert!(!h.styled_reply());
     }
 
     #[test]

@@ -47,6 +47,7 @@ services:
       - BOT__LOG_LEVEL=info
       - BOT__SIGNAL_USERNAME=sigstackdemo
       - BOT__GITHUB_REPO=https://github.com/BreadchainCoop/sigstack-near
+      - BOT__VERIFIER_URL=https://breadchaincoop.github.io/sigstack-near/
       - DSTACK__SOCKET_PATH=/var/run/dstack.sock
       - GROUP_PREFERENCES__PERSIST=true
       - GROUP_PREFERENCES__STORAGE_PATH=/data/group_prefs.enc

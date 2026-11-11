@@ -218,12 +218,28 @@ pub struct SendMessageRequest {
     pub recipients: Option<Vec<String>>,
 }
 
+/// How signal-cli-rest-api renders an outgoing message's text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextMode {
+    /// Literal text, the API default.
+    #[default]
+    Normal,
+    /// `**bold**`, `*italic*`, `~strikethrough~`, `||spoiler||` and `` `monospace` ``
+    /// become Signal text styles. Only for text the bot writes itself: user or model
+    /// text could contain the markers and be misrendered.
+    Styled,
+}
+
 /// Outgoing message request for `/v2/send` (text + optional quote-reply).
 #[derive(Debug, Clone, Serialize)]
 pub struct SendMessageV2Request {
     pub message: String,
     pub number: String,
     pub recipients: Vec<String>,
+    /// Omitted for [`TextMode::Normal`], so plain sends are unchanged on the wire.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_mode: Option<TextMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quote_timestamp: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
