@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
 
   signal-registration-proxy:
-    image: ghcr.io/breadchaincoop/sigstack-near-registration-proxy@sha256:8d4d0207eddc00c183ec3a2250daded59842560b9883ad23a07b81d300922b4b
+    image: ghcr.io/breadchaincoop/sigstack-near-registration-proxy@sha256:112142eca83a23fce226e40385b60e61132ac236c96aac38ae05608b664bec80
     environment:
       - SIGNAL__API_URL=http://signal-api:8080
       - REGISTRY__PATH=/data/registry.enc
