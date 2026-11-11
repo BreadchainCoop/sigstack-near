@@ -520,7 +520,9 @@ impl SignalClient {
             .send()
             .await?;
         if !response.status().is_success() {
-            return Err(SignalError::SendFailed(response.text().await.unwrap_or_default()));
+            return Err(SignalError::SendFailed(
+                response.text().await.unwrap_or_default(),
+            ));
         }
         Ok(())
     }
