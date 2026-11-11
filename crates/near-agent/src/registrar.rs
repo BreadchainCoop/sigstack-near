@@ -162,7 +162,10 @@ impl Registrar {
     /// Sends `amount` from the agent back to the sponsor, relayed so the sponsor pays gas.
     async fn return_excess(&self, amount: u128) {
         let sponsor_id = self.sponsor_id.clone();
-        match self.relay(&sponsor_id, Action::Transfer { deposit: amount }).await {
+        match self
+            .relay(&sponsor_id, Action::Transfer { deposit: amount })
+            .await
+        {
             Ok(tx_hash) => info!(
                 "Returned {amount} yoctoNEAR of refunded deposit to {sponsor_id} (tx {tx_hash})"
             ),
