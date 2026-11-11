@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
 
   signal-bot:
-    image: ghcr.io/breadchaincoop/sigstack-near-bot-tee@sha256:76ca76b469349d7e9e15f13e2fa027446f5e20624d5606c0db4db2e92e4de9df
+    image: ghcr.io/breadchaincoop/sigstack-near-bot-tee@sha256:d8f88b51eca7656eccf8063f658416d5e00460215e6c12fe447f8dae0479e312
     environment:
       - SIGNAL__SERVICE_URL=http://signal-api:8080
       - SIGNAL__PHONE_NUMBER=${SIGNAL_PHONE}
