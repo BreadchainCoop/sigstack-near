@@ -38,8 +38,8 @@ impl Typing {
 
     /// Stops refreshing and clears the indicator in the background, so the next message
     /// isn't held up either.
-    fn stop(self, signal: &SignalClient, message: &BotMessage) {
-        if let Some(refresh) = self.0 {
+    fn stop(mut self, signal: &SignalClient, message: &BotMessage) {
+        if let Some(refresh) = self.0.take() {
             refresh.abort();
             let (signal, message) = (signal.clone(), message.clone());
             tokio::spawn(async move {
@@ -47,6 +47,16 @@ impl Typing {
                     debug!("Clearing typing indicator failed: {e}");
                 }
             });
+        }
+    }
+}
+
+/// If a handler panics, `stop` never runs. Abort the refresh loop anyway, so the bot doesn't
+/// keep showing "typing" in that chat until it restarts.
+impl Drop for Typing {
+    fn drop(&mut self) {
+        if let Some(refresh) = self.0.take() {
+            refresh.abort();
         }
     }
 }
@@ -491,6 +501,24 @@ mod tests {
         assert!(eventually(&server, |r| r.iter().any(|(m, _)| m == "PUT")).await);
         typing.stop(&signal, &message);
         assert!(eventually(&server, |r| r.iter().any(|(m, _)| m == "DELETE")).await);
+    }
+
+    // Dropping the guard without `stop` (a panicking handler) still ends the refresh loop.
+    #[tokio::test]
+    async fn dropped_typing_guard_stops_refreshing() {
+        let (server, signal) = signal_mock().await;
+        mount_typing(&server).await;
+        let typing = Typing::start(&signal, &dm("!verify x"));
+        let refresh = typing.0.as_ref().unwrap().abort_handle();
+
+        drop(typing);
+        for _ in 0..50 {
+            if refresh.is_finished() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(refresh.is_finished());
     }
 
     // A slow Signal API (seconds per call in signal-cli's normal mode) must not delay the

@@ -198,7 +198,10 @@ impl VerifyHandler {
 
         match &result.challenge {
             Some(challenge) => {
-                lines.push(format!("**Your challenge:** {challenge}"));
+                // A reply break in the echo would split the reply early. The quote binds the
+                // original text, so this only changes what's shown.
+                let shown = challenge.replace(REPLY_BREAK, "\u{fffd}");
+                lines.push(format!("**Your challenge:** {shown}"));
                 if result.was_hashed {
                     lines.push(HASHED_NOTE.into());
                 }
@@ -530,6 +533,27 @@ mod tests {
         assert!(!parts[0].contains(&quote));
         assert_eq!(parts[1], quote);
         assert!(handler.styled_reply());
+    }
+
+    // A reply break typed into the challenge can't split the reply: the quote is still
+    // the one and only second message.
+    #[test]
+    fn challenge_cannot_split_the_reply() {
+        let handler = create_test_handler();
+        let result = AttestationResult {
+            in_tee: true,
+            compose_hash: Some("abc123".into()),
+            quote: Some("0400".into()),
+            challenge: Some(format!("Sigstack: a{REPLY_BREAK}b")),
+            report_data_hex: Some("00".into()),
+            ..Default::default()
+        };
+
+        let response = handler.format_response(result);
+        let parts: Vec<&str> = response.split(REPLY_BREAK).collect();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].contains("Sigstack: a\u{fffd}b"));
+        assert_eq!(parts[1], "0400");
     }
 
     // Without a quote there's nothing to send separately.
