@@ -10,6 +10,7 @@ use crate::transcribe_prefs::GroupTranscribePrefs;
 use crate::transcript_fanout::SuiteTranscriptFanout;
 use anyhow::Context;
 use dstack_client::DstackClient;
+use near_ai_client::verify::{BackgroundVerifier, ModelVerifier, VerifierConfig};
 use near_ai_client::NearAiClient;
 use signal_bot_voice::{build_voice_handlers, SharedTranscriptFanout};
 use signal_client::SignalClient;
@@ -42,15 +43,29 @@ pub async fn build_handlers(
         .as_ref()
         .context("NEAR AI config missing after validation")?;
 
-    let near_ai = Arc::new(
-        NearAiClient::new(
-            &near_cfg.api_key,
-            &near_cfg.base_url,
-            &near_cfg.model,
-            near_cfg.timeout,
-        )
-        .context("Failed to create NEAR AI client")?,
-    );
+    let mut near_ai = NearAiClient::new(
+        &near_cfg.api_key,
+        &near_cfg.base_url,
+        &near_cfg.model,
+        near_cfg.timeout,
+    )
+    .context("Failed to create NEAR AI client")?;
+    if near_cfg.verify_responses {
+        let verifier = Arc::new(
+            ModelVerifier::new(VerifierConfig::new(&near_cfg.base_url), &near_cfg.api_key)
+                .context("Failed to create NEAR AI verifier")?,
+        );
+        // Attest both models up front; chat responses are then checked as they arrive.
+        for model in [near_cfg.model.clone(), config.whisper.model.clone()] {
+            let verifier = verifier.clone();
+            tokio::spawn(async move { verifier.attest(&model).await });
+        }
+        info!("Verifying NEAR AI responses and model attestations");
+        near_ai = near_ai
+            .with_no_aliasing(true)
+            .with_observer(Arc::new(BackgroundVerifier(verifier)));
+    }
+    let near_ai = Arc::new(near_ai);
 
     if near_ai.health_check().await {
         info!("NEAR AI healthy - Model: {}", near_cfg.model);
@@ -284,10 +299,31 @@ mod tests {
             base_url: near.uri(),
             model: "test-model".into(),
             timeout: Duration::from_secs(5),
+            verify_responses: false,
         });
         config.whisper.service_url = near.uri();
         config.whisper.enabled = true;
         config
+    }
+
+    #[tokio::test]
+    async fn builds_with_response_verification() {
+        let near = mock_near().await;
+        let mut config = with_near(base_config(), &near);
+        config.near_ai.as_mut().unwrap().verify_responses = true;
+
+        let signal = Arc::new(SignalClient::new("http://127.0.0.1:9").unwrap());
+        let dstack = Arc::new(DstackClient::new(&config.dstack.socket_path));
+        let built = build_handlers(
+            &config,
+            signal,
+            dstack,
+            BotIdentity::new(),
+            "sigstack.test".into(),
+        )
+        .await
+        .expect("handlers with verification");
+        assert_eq!(built.handlers.len(), 24);
     }
 
     #[tokio::test]

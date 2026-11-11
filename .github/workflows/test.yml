@@ -22,6 +22,19 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      # TEMPORARY: resolve the lockfile for new dependencies (MSRV-aware, for the
+      # 1.88 Docker build) and upload it. Remove before merging.
+      - name: Resolve Cargo.lock
+        env:
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+        run: cargo metadata --format-version 1 > /dev/null
+
+      - name: Upload Cargo.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-lock
+          path: Cargo.lock
+
       - name: Format
         run: cargo fmt --all -- --check
 

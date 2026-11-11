@@ -3,8 +3,9 @@
 mod client;
 mod error;
 mod types;
+pub mod verify;
 
-pub use client::NearAiClient;
+pub use client::{ChatExchange, ChatObserver, NearAiClient};
 pub use error::NearAiError;
 pub use types::*;
 
@@ -12,7 +13,7 @@ pub use types::*;
 mod tests {
     use super::*;
     use std::time::Duration;
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{header, header_exists, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     async fn create_test_client(mock_server: &MockServer) -> NearAiClient {
@@ -326,23 +327,63 @@ mod tests {
         assert_eq!(client.model(), "test-model");
     }
 
+    struct Recorder(std::sync::Mutex<Vec<ChatExchange>>);
+
+    impl ChatObserver for Recorder {
+        fn observe(&self, exchange: ChatExchange) {
+            self.0.lock().unwrap().push(exchange);
+        }
+    }
+
     #[tokio::test]
-    async fn test_get_attestation() {
+    async fn chat_reports_the_exact_bytes_to_the_observer() {
         let mock_server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/attestation"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "signing_address": "0xabc",
-                "nvidia_payload": "payload",
-                "intel_quote": "quote"
-            })))
+        let body = r#"{"id":"chat-1","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"Bonjour"},"finish_reason":"stop"}]}"#;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(header("x-no-aliasing", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
             .mount(&mock_server)
             .await;
 
+        let recorder = std::sync::Arc::new(Recorder(Default::default()));
+        let client = create_test_client(&mock_server)
+            .await
+            .with_no_aliasing(true)
+            .with_observer(recorder.clone());
+        let reply = client
+            .chat(vec![Message::user("Hello")], None, None)
+            .await
+            .unwrap();
+        assert_eq!(reply, "Bonjour");
+
+        let seen = recorder.0.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].chat_id, "chat-1");
+        assert_eq!(seen[0].model, "test-model");
+        assert_eq!(seen[0].response, body.as_bytes());
+        let sent = &mock_server.received_requests().await.unwrap()[0].body;
+        assert_eq!(&seen[0].request, sent);
+    }
+
+    #[tokio::test]
+    async fn chat_sends_no_aliasing_header_only_when_asked() {
+        let mock_server = MockServer::start().await;
+        Mock::given(header_exists("x-no-aliasing"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "c", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}}]
+            })))
+            .mount(&mock_server)
+            .await;
         let client = create_test_client(&mock_server).await;
-        let report = client.get_attestation().await.unwrap();
-        assert_eq!(report.extra["signing_address"], "0xabc");
-        assert_eq!(report.extra["intel_quote"], "quote");
+        client.chat(vec![Message::user("hi")], None, None).await.unwrap();
     }
 
     #[tokio::test]

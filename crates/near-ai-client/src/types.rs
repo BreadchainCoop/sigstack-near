@@ -200,13 +200,6 @@ pub struct AudioTranscriptionResponse {
     pub language: Option<String>,
 }
 
-/// Attestation report from NEAR AI.
-#[derive(Debug, Clone, Deserialize)]
-pub struct AttestationReport {
-    #[serde(flatten)]
-    pub extra: serde_json::Value,
-}
-
 /// Response from chat with tools.
 #[derive(Debug, Clone)]
 pub struct ChatResponseWithTools {

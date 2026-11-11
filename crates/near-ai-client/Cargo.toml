@@ -13,6 +13,14 @@ tracing.workspace = true
 futures.workspace = true
 tokio-stream.workspace = true
 secrecy.workspace = true
+# Response verification (src/verify): quote collateral from near-agent, the TDX quote
+# check from dcap-qvl (the version the agent contract uses), ed25519 from ring.
+near-agent = { path = "../near-agent" }
+dcap-qvl = { version = "=0.5.2", default-features = false, features = ["std", "ring", "default-x509"] }
+ring = "0.17"
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 tokio-test.workspace = true
