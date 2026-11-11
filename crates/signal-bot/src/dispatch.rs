@@ -5,7 +5,49 @@ use crate::commands::CommandHandler;
 use crate::entitlement_gate::EntitlementGate;
 use signal_bot_core::REPLY_BREAK;
 use signal_client::{BotMessage, SignalClient, SignalError, TextMode};
+use std::time::Duration;
+use tokio::task::JoinHandle;
 use tracing::{debug, error};
+
+/// Signal clients hide a typing indicator after about 15 seconds, so it's refreshed sooner.
+const TYPING_REFRESH: Duration = Duration::from_secs(10);
+
+/// The bot's typing indicator while a command runs, so a slow reply (a TDX quote, a NEAR AI
+/// call) doesn't look like the bot is dead. Only for `!` commands: every message in a group
+/// reaches the default handler, and the bot shouldn't appear to type at each one.
+struct Typing(Option<JoinHandle<()>>);
+
+impl Typing {
+    /// Turns the indicator on before the handler runs, then keeps it on in the background.
+    async fn start(signal: &SignalClient, message: &BotMessage) -> Self {
+        if !message.text.trim_start().starts_with('!') {
+            return Self(None);
+        }
+        if let Err(e) = signal.set_typing(message, true).await {
+            debug!("Typing indicator failed: {e}");
+            return Self(None);
+        }
+        let (signal, message) = (signal.clone(), message.clone());
+        Self(Some(tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(TYPING_REFRESH).await;
+                if signal.set_typing(&message, true).await.is_err() {
+                    return;
+                }
+            }
+        })))
+    }
+
+    /// Stops refreshing and clears the indicator.
+    async fn stop(self, signal: &SignalClient, message: &BotMessage) {
+        if let Some(refresh) = self.0 {
+            refresh.abort();
+            if let Err(e) = signal.set_typing(message, false).await {
+                debug!("Clearing typing indicator failed: {e}");
+            }
+        }
+    }
+}
 
 /// Result of attempting to dispatch one inbound message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +153,22 @@ pub async fn dispatch_message(
         };
     }
 
+    let typing = Typing::start(signal, message).await;
+    let outcome =
+        execute_and_reply(handler.as_ref(), signal, message, quote_reply, own_reply).await;
+    typing.stop(signal, message).await;
+    outcome
+}
+
+/// Runs the handler and sends its reply (or the error fallback) unless it sends its own.
+async fn execute_and_reply(
+    handler: &dyn CommandHandler,
+    signal: &SignalClient,
+    message: &BotMessage,
+    quote_reply: bool,
+    own_reply: bool,
+) -> DispatchOutcome {
+    let label = handler.label();
     match handler.execute(message).await {
         Ok(response) => {
             if own_reply {
@@ -261,6 +319,27 @@ mod tests {
         }
     }
 
+    async fn mount_typing(server: &MockServer) {
+        for verb in ["PUT", "DELETE"] {
+            Mock::given(method(verb))
+                .and(path("/v1/typing-indicator/%2B15550001111"))
+                .respond_with(ResponseTemplate::new(204))
+                .expect(1)
+                .mount(server)
+                .await;
+        }
+    }
+
+    async fn received(server: &MockServer) -> Vec<(String, String)> {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| (r.method.to_string(), r.url.path().to_string()))
+            .collect()
+    }
+
     fn open_gate() -> EntitlementGate {
         EntitlementGate {
             store: EntitlementsStore::new_in_memory(),
@@ -379,11 +458,72 @@ mod tests {
             .await
             .unwrap()
             .iter()
+            .filter(|r| r.url.path() == "/v2/send")
             .map(|r| serde_json::from_slice(&r.body).unwrap())
             .collect();
+        assert_eq!(bodies.len(), 2);
         assert_eq!(bodies[0]["message"], "**first**");
         assert_eq!(bodies[1]["message"], "second");
         assert!(bodies.iter().all(|b| b["text_mode"] == "styled"));
+    }
+
+    // A command shows the typing indicator before running and clears it after replying.
+    #[tokio::test]
+    async fn commands_type_while_running() {
+        let (server, signal) = signal_mock().await;
+        mount_typing(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v2/send"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let handlers: Vec<Box<dyn CommandHandler>> = vec![Box::new(StubHandler {
+            trigger: "!help",
+            label: "help",
+            quote: false,
+            own_reply: false,
+            fail: false,
+            calls: Arc::new(AtomicUsize::new(0)),
+        })];
+        let identity = BotIdentity::new();
+        dispatch_message(&handlers, &signal, &identity, &dm("!help"), &open_gate()).await;
+
+        let typing = "/v1/typing-indicator/%2B15550001111".to_string();
+        assert_eq!(
+            received(&server).await,
+            vec![
+                ("PUT".to_string(), typing.clone()),
+                ("POST".to_string(), "/v2/send".to_string()),
+                ("DELETE".to_string(), typing),
+            ]
+        );
+    }
+
+    // Ordinary messages that reach a handler don't make the bot look like it's typing.
+    #[tokio::test]
+    async fn plain_messages_do_not_type() {
+        let (server, signal) = signal_mock().await;
+        Mock::given(method("POST"))
+            .and(path("/v2/send"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .mount(&server)
+            .await;
+
+        let handlers: Vec<Box<dyn CommandHandler>> = vec![Box::new(StubHandler {
+            trigger: "hel",
+            label: "chat",
+            quote: false,
+            own_reply: false,
+            fail: false,
+            calls: Arc::new(AtomicUsize::new(0)),
+        })];
+        let identity = BotIdentity::new();
+        dispatch_message(&handlers, &signal, &identity, &dm("hello"), &open_gate()).await;
+
+        let methods: Vec<String> = received(&server).await.into_iter().map(|r| r.0).collect();
+        assert_eq!(methods, vec!["POST".to_string()]);
     }
 
     #[tokio::test]
