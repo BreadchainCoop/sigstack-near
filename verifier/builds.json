@@ -1,11 +1,19 @@
 [
   {
+    "compose_hash": "05be66bc30f35a0387ae933b98e35f6a4830dcc45d80481312208fba75fdc947",
+    "app_compose": "builds/05be66bc30f35a0387ae933b98e35f6a4830dcc45d80481312208fba75fdc947.json",
+    "images_commit": "939316e5e62678c11283169c8d562d0e530aa7ee",
+    "images_run": 43106581693,
+    "pinned_in_pr": 39,
+    "summary": "Current demo build. The sponsor relays registration as a meta-transaction, so each boot's account holds only 0.003 NEAR. Styled replies, a copyable !verify quote, and a typing indicator while commands run."
+  },
+  {
     "compose_hash": "a949c1ffaf5aede815321e6a3fc7bb4190637522f38bb841ff13fe50051b507d",
     "app_compose": "builds/a949c1ffaf5aede815321e6a3fc7bb4190637522f38bb841ff13fe50051b507d.json",
     "images_commit": "bba9335dd65836e678bf9df1bb52a10d338a5ad3",
     "images_run": 43081163816,
     "pinned_in_pr": 27,
-    "summary": "Current demo build. Funds each agent account enough for prepaid gas, and registers only after the Signal check passes."
+    "summary": "Funds each agent account enough for prepaid gas, and registers only after the Signal check passes; replaced by 05be66bc."
   },
   {
     "compose_hash": "3b1c070a5c9ddafc7e3a0de188454d7ec298305bce66769128fece44b66d7905",
