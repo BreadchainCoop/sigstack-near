@@ -358,7 +358,9 @@ mod tests {
             .unwrap();
         assert_eq!(reply, "Bonjour");
 
-        let sent = mock_server.received_requests().await.unwrap()[0].body.clone();
+        let sent = mock_server.received_requests().await.unwrap()[0]
+            .body
+            .clone();
         let seen = recorder.0.lock().unwrap();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].chat_id, "chat-1");
