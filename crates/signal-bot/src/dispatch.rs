@@ -3,7 +3,8 @@
 use crate::bot_identity::BotIdentity;
 use crate::commands::CommandHandler;
 use crate::entitlement_gate::EntitlementGate;
-use signal_client::{BotMessage, SignalClient};
+use signal_bot_core::REPLY_BREAK;
+use signal_client::{BotMessage, SignalClient, SignalError, TextMode};
 use tracing::{debug, error};
 
 /// Result of attempting to dispatch one inbound message.
@@ -23,6 +24,35 @@ pub enum DispatchOutcome {
         label: &'static str,
         sent_reply: bool,
     },
+}
+
+/// Sends a handler's reply: one Signal message per [`REPLY_BREAK`]-separated part, in
+/// order, stopping at the first failed send. A reply without a break is sent as is.
+async fn send_reply(
+    signal: &SignalClient,
+    message: &BotMessage,
+    response: &str,
+    quote: bool,
+    mode: TextMode,
+) -> Result<(), SignalError> {
+    let parts: Vec<&str> = if response.contains(REPLY_BREAK) {
+        response
+            .split(REPLY_BREAK)
+            .filter(|part| !part.trim().is_empty())
+            .collect()
+    } else {
+        vec![response]
+    };
+    for part in parts {
+        if quote {
+            signal
+                .reply_quoted_with_mode(message, part, None, mode)
+                .await?;
+        } else {
+            signal.reply_with_mode(message, part, mode).await?;
+        }
+    }
+    Ok(())
 }
 
 /// Note bot identity, find the first matching handler, execute, and reply when needed.
@@ -90,11 +120,12 @@ pub async fn dispatch_message(
                     used_quote: quote_reply,
                 };
             }
-            let send_result = if quote_reply {
-                signal.reply_quoted(message, &response, None).await
+            let mode = if handler.styled_reply() {
+                TextMode::Styled
             } else {
-                signal.reply(message, &response).await
+                TextMode::Normal
             };
+            let send_result = send_reply(signal, message, &response, quote_reply, mode).await;
             if let Err(e) = send_result {
                 error!("Failed to send reply: {}", e);
                 return DispatchOutcome::Matched {
@@ -212,6 +243,24 @@ mod tests {
         m
     }
 
+    /// Replies with two styled parts.
+    struct TwoPartHandler;
+
+    #[async_trait]
+    impl CommandHandler for TwoPartHandler {
+        fn trigger(&self) -> Option<&str> {
+            Some("!verify")
+        }
+
+        fn styled_reply(&self) -> bool {
+            true
+        }
+
+        async fn execute(&self, _message: &BotMessage) -> AppResult<String> {
+            Ok(format!("**first**{REPLY_BREAK}second{REPLY_BREAK}  "))
+        }
+    }
+
     fn open_gate() -> EntitlementGate {
         EntitlementGate {
             store: EntitlementsStore::new_in_memory(),
@@ -294,6 +343,47 @@ mod tests {
             attachments: vec![],
             quote: None,
         }));
+    }
+
+    // Each part goes out as its own styled message, in order; blank parts are skipped.
+    #[tokio::test]
+    async fn styled_multi_part_reply_sends_each_part() {
+        let (server, signal) = signal_mock().await;
+        Mock::given(method("POST"))
+            .and(path("/v2/send"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let handlers: Vec<Box<dyn CommandHandler>> = vec![Box::new(TwoPartHandler)];
+        let identity = BotIdentity::new();
+        let outcome = dispatch_message(
+            &handlers,
+            &signal,
+            &identity,
+            &dm("!verify x"),
+            &open_gate(),
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            DispatchOutcome::Matched {
+                sent_reply: true,
+                ..
+            }
+        ));
+
+        let bodies: Vec<serde_json::Value> = server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect();
+        assert_eq!(bodies[0]["message"], "**first**");
+        assert_eq!(bodies[1]["message"], "second");
+        assert!(bodies.iter().all(|b| b["text_mode"] == "styled"));
     }
 
     #[tokio::test]

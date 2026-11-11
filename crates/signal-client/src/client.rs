@@ -453,10 +453,24 @@ impl SignalClient {
         recipient: &str,
         message: &str,
     ) -> Result<(), SignalError> {
+        self.send_with_mode(from_number, recipient, message, TextMode::Normal)
+            .await
+    }
+
+    /// [`Self::send`] with an explicit [`TextMode`].
+    #[instrument(skip(self, message))]
+    pub async fn send_with_mode(
+        &self,
+        from_number: &str,
+        recipient: &str,
+        message: &str,
+        mode: TextMode,
+    ) -> Result<(), SignalError> {
         self.send_v2(SendMessageV2Request {
             message: message.to_string(),
             number: from_number.to_string(),
             recipients: vec![recipient.to_string()],
+            text_mode: text_mode_field(mode),
             quote_timestamp: None,
             quote_author: None,
             quote_message: None,
@@ -490,8 +504,19 @@ impl SignalClient {
     /// Reply to a message (handles both direct and group messages).
     /// Uses the receiving account to send the reply.
     pub async fn reply(&self, original: &BotMessage, message: &str) -> Result<(), SignalError> {
+        self.reply_with_mode(original, message, TextMode::Normal)
+            .await
+    }
+
+    /// [`Self::reply`] with an explicit [`TextMode`].
+    pub async fn reply_with_mode(
+        &self,
+        original: &BotMessage,
+        message: &str,
+        mode: TextMode,
+    ) -> Result<(), SignalError> {
         let recipient = self.resolve_send_recipient(original).await?;
-        self.send(&original.receiving_account, &recipient, message)
+        self.send_with_mode(&original.receiving_account, &recipient, message, mode)
             .await
     }
 
@@ -503,17 +528,33 @@ impl SignalClient {
         message: &str,
         quote_snippet: Option<&str>,
     ) -> Result<(), SignalError> {
+        self.reply_quoted_with_mode(original, message, quote_snippet, TextMode::Normal)
+            .await
+    }
+
+    /// [`Self::reply_quoted`] with an explicit [`TextMode`].
+    #[instrument(skip(self, message))]
+    pub async fn reply_quoted_with_mode(
+        &self,
+        original: &BotMessage,
+        message: &str,
+        quote_snippet: Option<&str>,
+        mode: TextMode,
+    ) -> Result<(), SignalError> {
         let snippet = quote_snippet
             .map(str::to_string)
             .or_else(|| quote_snippet_for_message(original));
+        let recipient = self.resolve_send_recipient(original).await?;
 
-        self.reply_quoted_target(
-            original,
-            original.message_timestamp,
-            original.quote_author(),
-            snippet.as_deref(),
-            message,
-        )
+        self.send_v2(SendMessageV2Request {
+            message: message.to_string(),
+            number: original.receiving_account.clone(),
+            recipients: vec![recipient],
+            text_mode: text_mode_field(mode),
+            quote_timestamp: Some(original.message_timestamp),
+            quote_author: Some(original.quote_author().to_string()),
+            quote_message: snippet,
+        })
         .await
     }
 
@@ -533,6 +574,7 @@ impl SignalClient {
             message: message.to_string(),
             number: context.receiving_account.clone(),
             recipients: vec![recipient],
+            text_mode: None,
             quote_timestamp: Some(quote_timestamp),
             quote_author: Some(quote_author.to_string()),
             quote_message: quote_snippet.map(str::to_string),
@@ -580,6 +622,11 @@ pub fn resolve_group_send_id(incoming_group_id: &str, groups: &[Group]) -> Optio
         .iter()
         .find(|g| g.internal_id == incoming_group_id)
         .map(|g| g.id.clone())
+}
+
+/// `text_mode` for a send request: omitted for normal text, as before styled mode existed.
+fn text_mode_field(mode: TextMode) -> Option<TextMode> {
+    (mode == TextMode::Styled).then_some(mode)
 }
 
 fn truncate_snippet(text: &str, max_len: usize) -> String {
