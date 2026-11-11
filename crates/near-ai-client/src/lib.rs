@@ -358,13 +358,13 @@ mod tests {
             .unwrap();
         assert_eq!(reply, "Bonjour");
 
+        let sent = mock_server.received_requests().await.unwrap()[0].body.clone();
         let seen = recorder.0.lock().unwrap();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].chat_id, "chat-1");
         assert_eq!(seen[0].model, "test-model");
         assert_eq!(seen[0].response, body.as_bytes());
-        let sent = &mock_server.received_requests().await.unwrap()[0].body;
-        assert_eq!(&seen[0].request, sent);
+        assert_eq!(seen[0].request, sent);
     }
 
     #[tokio::test]
