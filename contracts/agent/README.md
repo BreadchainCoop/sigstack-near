@@ -76,13 +76,16 @@ docker run --rm -v "$(pwd)":/workspace -w /workspace \
 
 ## Testing
 
-You need to build the contract first
+From the repo root, one command runs the unit tests, builds the wasm in the pinned image, and runs
+the integration tests against it. It needs rustup and Docker, and it's what CI runs:
 
 ```bash
-cargo test
+./scripts/test_contract.sh
 ```
 
-Tests cover only `requires_tee = false` (can't produce valid TEE attestation outside of TEE).
+Most tests use `requires_tee = false`, because a valid TDX quote can't be produced outside a TEE.
+The `requires_tee = true` unit tests cover what can be checked without one: named accounts are
+rejected, the mock attestation fails quote verification, and local-mode whitelisting is refused.
 
 ### Unit tests
 

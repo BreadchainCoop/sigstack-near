@@ -7,7 +7,8 @@ use shade_attestation::{
     tcb_info::HexBytes,
 };
 
-// Only testing requires_tee = false since we cannot produce a valid attestation for a TEE in unit tests
+// Most tests use requires_tee = false, since unit tests cannot produce a real TDX quote.
+// The requires_tee = true tests cover the checks a quote can't get past without one.
 
 // Deposit constants for tests
 const DEPOSIT_005_NEAR: NearToken = NearToken::from_yoctonear(5_000_000_000_000_000_000_000); // 0.005 NEAR
@@ -853,4 +854,48 @@ fn summarize_advisory_ids_above_cap_truncates_but_counts_all() {
     let (shown, total) = summarize_advisory_ids(&ids);
     assert_eq!(shown.as_slice(), &ids[..MAX_ADVISORY_IDS]);
     assert_eq!(total as usize, MAX_ADVISORY_IDS + 4);
+}
+
+// TEE mode, with the mock measurements and PPID approved.
+fn setup_tee_contract() -> Contract {
+    let owner = accounts(0);
+    let context = get_context(owner.clone(), false);
+    testing_env!(context.build());
+    let mut contract = Contract::new(true, U64::from(100000u64), owner);
+    contract.approve_measurements(create_mock_full_measurements_hex());
+    contract.approve_ppids(vec![Ppid::default()]);
+    contract
+}
+
+// An implicit account ID is the agent's public key, which the quote's report data binds.
+// A named account has no such binding, so TEE mode rejects it before reading the quote.
+#[test]
+#[should_panic(expected = "Account ID must be implicit account")]
+fn test_tee_register_rejects_named_account() {
+    let mut contract = setup_tee_contract();
+    let context = get_context_with_deposit(accounts(2), false, Some(DEPOSIT_005_NEAR));
+    testing_env!(context.build());
+
+    contract.register_agent(create_mock_dstack_attestation());
+}
+
+// The mock attestation local mode accepts fails quote verification in TEE mode, even with
+// the mock measurements and PPID approved.
+#[test]
+#[should_panic(expected = "Attestation verification failed")]
+fn test_tee_register_rejects_mock_attestation() {
+    let mut contract = setup_tee_contract();
+    let agent: AccountId = "ab".repeat(32).parse().unwrap();
+    let context = get_context_with_deposit(agent, false, Some(DEPOSIT_005_NEAR));
+    testing_env!(context.build());
+
+    contract.register_agent(create_mock_dstack_attestation());
+}
+
+// Local-mode whitelisting can't be used to skip attestation in TEE mode.
+#[test]
+#[should_panic(expected = "Whitelisting agents is not supported for TEE")]
+fn test_tee_whitelist_is_rejected() {
+    let mut contract = setup_tee_contract();
+    contract.whitelist_agent_for_local(accounts(2));
 }
