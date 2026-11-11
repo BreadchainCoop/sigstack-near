@@ -2,6 +2,7 @@
 
 use anyhow::Context;
 use dstack_client::DstackClient;
+use near_agent::Registrar;
 use signal_bot::bot_identity::BotIdentity;
 use signal_bot::config::Config;
 use signal_bot::dispatch::dispatch_message;
@@ -33,7 +34,8 @@ async fn main() -> AppResult<()> {
         SignalClient::new(&config.signal.service_url).context("Failed to create Signal client")?,
     );
 
-    if dstack.is_in_tee().await {
+    let in_tee = dstack.is_in_tee().await;
+    if in_tee {
         if let Ok(info) = dstack.get_app_info().await {
             info!(
                 "Running in TEE - App ID: {}",
@@ -42,6 +44,26 @@ async fn main() -> AppResult<()> {
         }
     } else {
         warn!("Not running in TEE environment - attestation unavailable");
+    }
+
+    // Each boot registers a fresh random agent key with the agent contract and keeps
+    // it registered. Failures are logged and retried; they never stop the bot.
+    if config.agent.enabled() {
+        if !in_tee {
+            warn!("AGENT__CONTRACT_ID set without a TEE - skipping agent registration");
+        } else {
+            match Registrar::new(&config.agent, dstack.clone()) {
+                Ok(registrar) => {
+                    info!(
+                        "Agent account {} registering with {}",
+                        registrar.account_id(),
+                        config.agent.contract_id
+                    );
+                    tokio::spawn(registrar.run());
+                }
+                Err(e) => error!("Agent registration disabled: {e}"),
+            }
+        }
     }
 
     if !signal.health_check().await {

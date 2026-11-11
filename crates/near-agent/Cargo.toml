@@ -1,0 +1,24 @@
+[package]
+name = "near-agent"
+version.workspace = true
+edition.workspace = true
+description = "Registers the bot with the Sigstack agent contract: TEE key, attestation, NEAR transactions"
+
+[dependencies]
+dstack-client = { path = "../dstack-client" }
+async-trait.workspace = true
+base64.workspace = true
+hex.workspace = true
+reqwest.workspace = true
+# Already in the lock through rustls; used for ed25519 keys and system randomness.
+ring = "0.17"
+serde.workspace = true
+# raw_value keeps Intel's signed TCB info / QE identity JSON byte-for-byte.
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true

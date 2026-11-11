@@ -38,6 +38,10 @@ pub struct Config {
     /// Encrypted persistence for paid/alpha entitlements (separate from feature prefs)
     #[serde(default)]
     pub entitlements: EntitlementsConfig,
+
+    /// Agent contract registration (`AGENT__*`); off unless `AGENT__CONTRACT_ID` is set
+    #[serde(default)]
+    pub agent: near_agent::AgentConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -393,6 +397,7 @@ mod tests {
             translate_all: TranslateAllConfig::default(),
             group_preferences: GroupPreferencesConfig::default(),
             entitlements: EntitlementsConfig::default(),
+            agent: Default::default(),
         }
     }
 

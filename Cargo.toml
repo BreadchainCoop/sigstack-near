@@ -6,6 +6,7 @@ members = [
     "crates/signal-bot-voice",
     "crates/near-ai-client",
     "crates/dstack-client",
+    "crates/near-agent",
     "crates/signal-client",
     "crates/signal-registration-proxy",
     "crates/signal-commerce",

@@ -22,6 +22,7 @@ COPY crates/signal-client/Cargo.toml crates/signal-client/
 COPY crates/signal-registration-proxy/Cargo.toml crates/signal-registration-proxy/
 COPY crates/signal-commerce/Cargo.toml crates/signal-commerce/
 COPY crates/whisper-client/Cargo.toml crates/whisper-client/
+COPY crates/near-agent/Cargo.toml crates/near-agent/
 
 # Minimal stubs so `cargo fetch` can resolve path dependencies
 RUN mkdir -p crates/signal-bot/src/commands && \
@@ -38,6 +39,7 @@ RUN mkdir -p crates/signal-bot/src/commands && \
     mkdir -p crates/dstack-client/src && echo "pub fn dummy() {}" > crates/dstack-client/src/lib.rs && \
     mkdir -p crates/signal-client/src && echo "pub fn dummy() {}" > crates/signal-client/src/lib.rs && \
     mkdir -p crates/whisper-client/src && echo "pub fn dummy() {}" > crates/whisper-client/src/lib.rs && \
+    mkdir -p crates/near-agent/src && echo "pub fn dummy() {}" > crates/near-agent/src/lib.rs && \
     mkdir -p crates/signal-registration-proxy/src && \
     echo "fn main() {}" > crates/signal-registration-proxy/src/main.rs && \
     mkdir -p crates/signal-commerce/src && \
