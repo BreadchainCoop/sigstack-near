@@ -2,9 +2,11 @@ mod helpers;
 
 use helpers::*;
 use near_api::Data;
-use serde_json::json;
+use serde_json::{Value, json};
+use sigstack_agent::ContractInfo;
 use tokio::time::{Duration, sleep};
 
+/// Upgrades the contract to this build's wasm and checks `migrate` keeps the state.
 #[tokio::test]
 async fn test_update_contract() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let sandbox = near_sandbox::Sandbox::start_sandbox().await?;
@@ -16,14 +18,9 @@ async fn test_update_contract() -> Result<(), Box<dyn std::error::Error + Send +
 
     sleep(Duration::from_millis(200)).await;
 
-    // Read the WASM bytes
-    let wasm_bytes = std::fs::read(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/contracts/contract_update.wasm"
-    ))?;
+    let wasm_bytes = std::fs::read(CONTRACT_WASM_PATH)?;
 
-    // Pass gas (10 TGas) + WASM bytes concatenated
-    // First 8 bytes: gas as u64 little-endian, then WASM code
+    // First 8 bytes: migrate gas in TGas as u64 little-endian, then the wasm code
     let gas_value: u64 = 10;
     let mut input = gas_value.to_le_bytes().to_vec();
     input.extend_from_slice(&wasm_bytes);
@@ -42,55 +39,29 @@ async fn test_update_contract() -> Result<(), Box<dyn std::error::Error + Send +
 
     sleep(Duration::from_millis(200)).await;
 
-    // Get the stored string (should be the owner_id from the migrated old state)
-    let stored_string_result: Data<String> = call_view(
+    let contract_info: Data<ContractInfo> = call_view(
         &contract_id,
-        "get_stored_string",
+        "get_contract_info",
         json!({}),
         &network_config,
     )
     .await?;
+    assert_eq!(contract_info.data.owner_id, genesis_account_id);
+    assert!(!contract_info.data.requires_tee);
+    assert_eq!(contract_info.data.attestation_expiration_time_ms.0, 100000);
 
-    let initial_value = stored_string_result.data;
-
-    // Verify it's the owner_id (genesis_account_id)
+    let measurements: Data<Vec<Value>> = call_view(
+        &contract_id,
+        "get_approved_measurements",
+        json!({}),
+        &network_config,
+    )
+    .await?;
     assert_eq!(
-        initial_value,
-        genesis_account_id.to_string(),
-        "Stored string should be the owner_id from old state"
+        measurements.data.len(),
+        1,
+        "Approved measurements should survive the upgrade"
     );
-
-    // Set a new stored string
-    let new_value = "Hello new contract!";
-    let _ = call_transaction(
-        &contract_id,
-        "set_stored_string",
-        json!({
-            "stored_string": new_value
-        }),
-        &genesis_account_id,
-        &genesis_signer,
-        &network_config,
-        None,
-    )
-    .await?
-    .assert_success();
-
-    sleep(Duration::from_millis(200)).await;
-
-    // Get the stored string again to verify it was updated
-    let updated_result: Data<String> = call_view(
-        &contract_id,
-        "get_stored_string",
-        json!({}),
-        &network_config,
-    )
-    .await?;
-
-    let updated_value = updated_result.data;
-
-    // Verify it was updated
-    assert_eq!(updated_value, new_value, "Stored string should be updated");
 
     Ok(())
 }

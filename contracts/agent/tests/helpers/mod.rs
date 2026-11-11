@@ -16,11 +16,8 @@ pub const DEPOSIT_005_NEAR: NearToken = NearToken::from_yoctonear(5_000_000_000_
 #[allow(dead_code)]
 pub const CONTRACT_WASM_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/target/near/shade_contract_template.wasm"
+    "/target/near/sigstack_agent.wasm"
 );
-#[allow(dead_code)]
-pub const MOCK_MPC_WASM_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/contracts/mock_mpc.wasm");
 
 #[allow(dead_code)]
 pub fn create_network_config(sandbox: &Sandbox) -> NetworkConfig {
@@ -163,7 +160,6 @@ pub async fn deploy_contract_default(
     genesis_signer: &Arc<Signer>,
 ) -> Result<AccountId, Box<dyn std::error::Error + Send + Sync>> {
     let owner = genesis_account_id.clone();
-    let mpc_contract: AccountId = "mpc-contract".parse().unwrap();
 
     // Use a short expiration time for tests: 100 seconds = 100000 ms
     let contract_id = deploy_contract(
@@ -174,7 +170,6 @@ pub async fn deploy_contract_default(
         Some("new"),
         Some(json!({
             "owner_id": owner,
-            "mpc_contract_id": mpc_contract,
             "requires_tee": false,
             "attestation_expiration_time_ms": "100000"
         })),
@@ -360,30 +355,6 @@ fn unwrap_full(
             Err(format!("transaction still pending: {status:?}").into())
         }
     }
-}
-
-#[allow(dead_code)]
-pub async fn deploy_mock_mpc_contract(
-    network_config: &NetworkConfig,
-    genesis_account_id: &AccountId,
-    genesis_signer: &Arc<Signer>,
-    contract_name: &str,
-) -> Result<AccountId, Box<dyn std::error::Error + Send + Sync>> {
-    let mpc_contract_id: AccountId = format!("{}.{}", contract_name, genesis_account_id).parse()?;
-
-    // Deploy mock MPC contract without init using deploy_contract
-    deploy_contract(
-        network_config,
-        genesis_account_id,
-        genesis_signer,
-        MOCK_MPC_WASM_PATH,
-        None,
-        None,
-        Some(mpc_contract_id.clone()),
-    )
-    .await?;
-
-    Ok(mpc_contract_id)
 }
 
 /// Extract and parse EVENT_JSON logs from a transaction result
