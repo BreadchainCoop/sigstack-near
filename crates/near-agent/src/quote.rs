@@ -1,6 +1,6 @@
 //! Just enough TDX quote parsing to fetch collateral: the PCK certificate chain
-//! embedded in the quote, and from its leaf certificate the FMSPC and issuing CA.
-//! The contract does the actual verification.
+//! embedded in the quote, and from its leaf certificate the FMSPC, issuing CA and
+//! PPID. The contract does the actual verification.
 
 use crate::AgentError;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -25,6 +25,10 @@ const CERT_DATA_QE_REPORT: u16 = 6;
 const FMSPC_OID: [u8; 12] = [
     0x06, 0x0a, 0x2a, 0x86, 0x48, 0x86, 0xf8, 0x4d, 0x01, 0x0d, 0x01, 0x04,
 ];
+/// DER of OID 1.2.840.113741.1.13.1.1 (Intel SGX extension: PPID).
+const PPID_OID: [u8; 12] = [
+    0x06, 0x0a, 0x2a, 0x86, 0x48, 0x86, 0xf8, 0x4d, 0x01, 0x0d, 0x01, 0x01,
+];
 
 pub fn pck_info(quote: &[u8]) -> Result<PckInfo, AgentError> {
     let leaf = first_certificate(pck_chain(quote)?)?;
@@ -32,6 +36,13 @@ pub fn pck_info(quote: &[u8]) -> Result<PckInfo, AgentError> {
         fmspc: hex::encode_upper(fmspc(&leaf)?),
         ca: pck_ca(&leaf),
     })
+}
+
+/// The platform's PPID from the leaf PCK certificate, lowercase hex: the value the
+/// contract checks against its approved PPIDs (dcap-qvl reads the same extension).
+pub fn ppid(quote: &[u8]) -> Result<String, AgentError> {
+    let leaf = first_certificate(pck_chain(quote)?)?;
+    Ok(hex::encode(sgx_extension(&leaf, &PPID_OID, "PPID", 16)?))
 }
 
 struct Reader<'a> {
@@ -127,18 +138,30 @@ fn first_certificate(pem: &[u8]) -> Result<Vec<u8>, AgentError> {
         .map_err(|e| AgentError::Quote(format!("PCK certificate is not base64: {e}")))
 }
 
-fn fmspc(cert: &[u8]) -> Result<[u8; 6], AgentError> {
+/// The value of SGX extension `oid` in `cert`: an OCTET STRING of `len` bytes.
+fn sgx_extension<'a>(
+    cert: &'a [u8],
+    oid: &[u8; 12],
+    name: &str,
+    len: usize,
+) -> Result<&'a [u8], AgentError> {
     let at = cert
-        .windows(FMSPC_OID.len())
-        .position(|w| w == FMSPC_OID)
-        .ok_or_else(|| AgentError::Quote("PCK certificate has no FMSPC".into()))?;
-    // OCTET STRING of 6 bytes.
-    match cert.get(at + FMSPC_OID.len()..at + FMSPC_OID.len() + 8) {
-        Some([0x04, 0x06, rest @ ..]) => Ok(rest.try_into().unwrap()),
-        _ => Err(AgentError::Quote(
-            "PCK certificate FMSPC is malformed".into(),
-        )),
+        .windows(oid.len())
+        .position(|w| w == oid)
+        .ok_or_else(|| AgentError::Quote(format!("PCK certificate has no {name}")))?;
+    let value = at + oid.len();
+    match cert.get(value..value + 2 + len) {
+        Some([0x04, n, rest @ ..]) if *n as usize == len => Ok(rest),
+        _ => Err(AgentError::Quote(format!(
+            "PCK certificate {name} is malformed"
+        ))),
     }
+}
+
+fn fmspc(cert: &[u8]) -> Result<[u8; 6], AgentError> {
+    Ok(sgx_extension(cert, &FMSPC_OID, "FMSPC", 6)?
+        .try_into()
+        .unwrap())
 }
 
 /// The leaf's issuer names the CA; anything unrecognised is treated as the
@@ -157,12 +180,17 @@ pub(crate) mod tests {
     use super::*;
 
     pub(crate) const FMSPC: [u8; 6] = [0x90, 0xc0, 0x6f, 0x00, 0x00, 0x00];
+    pub(crate) const PPID: [u8; 16] = [0xab; 16];
 
     /// Bytes standing in for a DER leaf certificate: an issuer name and the SGX
-    /// FMSPC extension are all the parser looks at.
+    /// PPID and FMSPC extensions are all the parser looks at.
     fn fake_cert(issuer: &str) -> Vec<u8> {
         let mut der = vec![0x30, 0x82, 0x01, 0x00];
         der.extend_from_slice(issuer.as_bytes());
+        der.extend_from_slice(&[0x30, 0x20]);
+        der.extend_from_slice(&PPID_OID);
+        der.extend_from_slice(&[0x04, 0x10]);
+        der.extend_from_slice(&PPID);
         der.extend_from_slice(&[0x30, 0x10]);
         der.extend_from_slice(&FMSPC_OID);
         der.extend_from_slice(&[0x04, 0x06]);
@@ -246,6 +274,16 @@ pub(crate) mod tests {
                 ca: "platform"
             }
         );
+    }
+
+    #[test]
+    fn reads_the_ppid() {
+        let quote = tdx_quote("Intel SGX PCK Platform CA");
+        assert_eq!(ppid(&quote).unwrap(), "ab".repeat(16));
+
+        let no_ppid = quote_with(4, TDX_TEE_TYPE, true, &pem(&[b"no extensions".to_vec()]));
+        let err = ppid(&no_ppid).unwrap_err();
+        assert!(err.to_string().contains("no PPID"), "{err}");
     }
 
     #[test]
