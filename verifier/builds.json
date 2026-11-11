@@ -1,11 +1,19 @@
 [
   {
+    "compose_hash": "812dae7d598a7258fc0fafd6caa2fb142b34a8d4268b685910cc64c992142cde",
+    "app_compose": "builds/812dae7d598a7258fc0fafd6caa2fb142b34a8d4268b685910cc64c992142cde.json",
+    "images_commit": "2b6647b5d27179baf51b7e48fcfa28d1dd586734",
+    "images_run": 43117613180,
+    "pinned_in_pr": 47,
+    "summary": "Current demo build. The agent pays for its own transfer when it returns refunded registration deposits, so each boot's account keeps only about 0.003 NEAR."
+  },
+  {
     "compose_hash": "0634364c719686c10c774bbfd9ea051303f393a6b36452e5c475104bf8fe5a70",
     "app_compose": "builds/0634364c719686c10c774bbfd9ea051303f393a6b36452e5c475104bf8fe5a70.json",
     "images_commit": "4770a6ba4091700d7ff24b03b10b7012263e0a36",
     "images_run": 43112499901,
     "pinned_in_pr": 42,
-    "summary": "Current demo build. Native signal-cli for faster replies, failed relayed calls reported with the contract's error, typing calls off the reply path, and a low-sponsor warning."
+    "summary": "Native signal-cli for faster replies, failed relayed calls reported with the contract's error, typing calls off the reply path, and a low-sponsor warning; replaced by 812dae7d."
   },
   {
     "compose_hash": "05be66bc30f35a0387ae933b98e35f6a4830dcc45d80481312208fba75fdc947",
