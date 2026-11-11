@@ -65,12 +65,109 @@ is never approved, and the CVM is then upgraded in place to the demo compose.
 
 ### Try it
 
-_To be written: the demo bot's Signal link, the public verifier page, and "do X, see Y" steps a
-judge can follow._
+Four ways to check this work. They're ordered from least to most setup.
+
+#### 1. Run the tests (no TEE, no NEAR account, no secrets)
+
+Needs [rustup](https://rustup.rs) and Docker.
+
+```bash
+./scripts/test_contract.sh   # agent contract: unit tests, wasm build, near-sandbox integration tests
+cargo test --workspace       # bot crates, including near-agent (attestation + registration)
+```
+
+CI runs the same commands: the [`contract`](.github/workflows/contract.yml) workflow runs the
+script, and the [`test`](.github/workflows/test.yml) workflow runs the bot tests with a ≥90%
+line-coverage gate. The contract's wasm is built in the same pinned `cargo-near` image CI uses,
+so it builds the same on Linux and macOS.
+
+What the contract tests cover (details in [`contracts/agent/README.md`](contracts/agent/README.md#testing)):
+
+- **Approvals:** approving and revoking measurements (which include the compose hash) and PPIDs.
+  Only the owner can do either.
+- **Registration:** registering with approved measurements, and rejection when the measurements
+  or PPID aren't approved.
+- **Expiry and pruning:** an expired or revoked agent can be pruned by anyone and must re-register.
+- **TEE mode:** named accounts are rejected, because the quote binds the agent's implicit
+  account. The mock attestation accepted in local mode fails real quote verification.
+- **Upgrades:** `update_contract` keeps the owner, settings and approvals.
+
+A unit test can't produce a real TDX quote, so verifying a genuine quote is exercised by the
+live demo below.
+
+The `near-agent` tests cover:
+
+- building the attestation from dstack's `tcb_info` and quote;
+- fetching collateral from PCCS;
+- signing and sending NEAR transactions;
+- the register-and-refresh loop.
+
+They run against mock dstack, PCCS and RPC servers.
+
+#### 2. Check the live contract on NEAR testnet (read-only)
+
+The agent contract is [`agent.sigstack.testnet`](https://testnet.nearblocks.io/address/agent.sigstack.testnet),
+owned by `sigstack.testnet`. With [near-cli-rs](https://github.com/near/near-cli-rs):
+
+```bash
+# Registered bots, with the measurements they attested and when they expire
+near contract call-function as-read-only agent.sigstack.testnet get_agents json-args '{}' network-config testnet now
+# Builds the owner has approved (the compose hash is app_compose_hash_payload)
+near contract call-function as-read-only agent.sigstack.testnet get_approved_measurements json-args '{}' network-config testnet now
+```
+
+The deployed code is traceable to this repo:
+
+- **Source:** the wasm the [`contract`](.github/workflows/contract.yml) workflow built from
+  commit `66f4b00` ([run 42946350559](https://github.com/BreadchainCoop/sigstack-near/actions/runs/42946350559)).
+- **wasm sha256:** `9890b61e434341c2c2b995e71690c054edd0ed0b960da421e267771366017667`, as logged
+  by that run.
+- **On-chain code hash:** `BGYxJkzMBrZZZ7Ju8D9UDV7rNpXfuw3ZG7de7xrAUPUA`. This is the base58 form
+  of the same sha256. Check it with
+  `near account view-account-summary agent.sigstack.testnet network-config testnet now`.
+
+_To be filled in once the demo bot is registered: its agent account, and how to match its
+attested compose hash to [`docker/phala-demo.yaml`](docker/phala-demo.yaml) at the submission tag
+(see [What the attestation pins](#what-the-attestation-pins))._
+
+#### 3. Talk to the demo bot in Signal
+
+_To be filled in: the demo bot's Signal link, and a `!verify <random text>` walkthrough._
+
+#### 4. Run your own bot (optional)
+
+You need your own Signal number and a NEAR AI API key. See [Local](#local). Outside a TEE the
+bot runs but doesn't register with the agent contract.
 
 ### Libraries and tools
 
-_Third-party libraries added for the hackathon work will be listed here (rule Q-005)._
+Third-party code added for the hackathon work (rule Q-005):
+
+- **Agent contract** ([`contracts/agent`](contracts/agent)):
+  - Adapted from `shade-contract-template` in
+    [NearDeFi/shade-agent-framework](https://github.com/NearDeFi/shade-agent-framework) at
+    `35758f3` (Apache-2.0).
+  - [`near-sdk`](https://crates.io/crates/near-sdk) 5.26.1.
+  - `shade-attestation` from the same framework commit (MIT). It brings in
+    [`dcap-qvl`](https://github.com/Phala-Network/dcap-qvl) 0.5.2 for TDX quote verification and
+    `dstack-sdk-types`.
+  - Tests: [`near-api`](https://crates.io/crates/near-api) 0.8.6,
+    [`near-sandbox`](https://crates.io/crates/near-sandbox) 0.3.11 and `tokio`.
+- **Bot** ([`crates/near-agent`](crates/near-agent)):
+  - No new third-party crates. It uses `ring`, `reqwest`, `serde_json`, `base64`, `sha2` and
+    `hex`, which were already in the lockfile.
+  - It implements dcap-qvl's collateral-fetch protocol, NEAR transaction encoding and NEAR
+    JSON-RPC directly.
+- **Tools:**
+  - [`cargo-near`](https://github.com/near/cargo-near) in the pinned
+    `sourcescan/cargo-near:0.19.0-rust-1.86.0` image.
+  - [near-cli-rs](https://github.com/near/near-cli-rs).
+  - GitHub Actions.
+- **Services:**
+  - [Phala Cloud](https://phala.com) (dstack TDX CVMs).
+  - Phala's PCCS and Intel's PCS (quote collateral).
+  - NEAR testnet RPC ([FastNEAR](https://fastnear.com)).
+  - [NEAR AI Cloud](https://cloud.near.ai).
 
 ### Other submissions
 
@@ -189,7 +286,8 @@ web/                            # legacy Private AI UI (not the storefront)
 
 ```bash
 cargo build --release
-cargo test
+cargo test --workspace          # bot crates
+./scripts/test_contract.sh      # agent contract (needs Docker); see "Try it" above
 ```
 
 ## Commit messages

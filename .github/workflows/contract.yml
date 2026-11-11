@@ -6,10 +6,12 @@ on:
     paths:
       - "contracts/agent/**"
       - ".github/workflows/contract.yml"
+      - "scripts/test_contract.sh"
   pull_request:
     paths:
       - "contracts/agent/**"
       - ".github/workflows/contract.yml"
+      - "scripts/test_contract.sh"
   workflow_dispatch:
 
 permissions:
@@ -34,18 +36,9 @@ jobs:
 
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked
-      - run: cargo test --lib --locked
-
-      # Same image and digest as Cargo.toml's reproducible_build metadata, so CI and
-      # release builds use one toolchain. The image runs as its own `near` user, so
-      # target/ is opened up for it and handed back to the runner afterwards.
-      - name: Build wasm
-        run: |
-          mkdir -p target && chmod -R a+rwX target
-          docker run --rm -v "$PWD":/workspace -w /workspace \
-            sourcescan/cargo-near@sha256:772638e343baeeea24e49062c7d424274f3441452cc06ce97fc4e5695b19fecc \
-            cargo near build non-reproducible-wasm --locked --no-abi
-          sudo chown -R "$(id -u):$(id -g)" target
+      # Unit tests, the wasm build in the pinned cargo-near image, and the near-sandbox
+      # integration tests: the same script the README gives judges.
+      - run: ../../scripts/test_contract.sh
 
       - name: Record wasm hash
         run: |
@@ -53,9 +46,6 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           sha256sum target/near/*.wasm | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-      # Sandbox integration tests load the wasm built above.
-      - run: cargo test --tests --locked
 
       - uses: actions/upload-artifact@v4
         with:
