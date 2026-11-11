@@ -975,7 +975,8 @@ fn test_tee_register_demo_quote() {
     contract.approve_measurements(demo_measurements());
     contract.approve_ppids(vec![demo_ppid()]);
 
-    assert!(register_demo(&mut contract, DEMO_AGENT, DEMO_REGISTERED_AT_MS));
+    let registered = register_demo(&mut contract, DEMO_AGENT, DEMO_REGISTERED_AT_MS);
+    assert!(registered);
 
     let agent = contract.get_agent(DEMO_AGENT.parse().unwrap()).unwrap();
     assert!(matches!(agent.validity, AgentValidity::Valid));
