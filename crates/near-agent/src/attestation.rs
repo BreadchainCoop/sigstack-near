@@ -106,7 +106,10 @@ pub async fn build_attestation(
 /// attestation register. All public values, for the contract owner to review.
 pub fn approval_args(attestation: &Value) -> Result<(Value, Value), AgentError> {
     let tcb = &attestation["tcb_info"];
-    let field = |key: &str| tcb[key].as_str().unwrap_or("").to_string();
+    let field = |key: &str| match tcb[key].as_str() {
+        Some(value) if !value.is_empty() => Ok(value.to_string()),
+        _ => Err(AgentError::Tee(format!("tcb_info has no {key}"))),
+    };
     let key_provider: Vec<&Value> = tcb["event_log"]
         .as_array()
         .into_iter()
@@ -119,17 +122,21 @@ pub fn approval_args(attestation: &Value) -> Result<(Value, Value), AgentError> 
             key_provider.len()
         )));
     };
+    let digest = event["digest"]
+        .as_str()
+        .filter(|d| !d.is_empty())
+        .ok_or_else(|| AgentError::Tee("key-provider event has no digest".into()))?;
     let quote: Vec<u8> = serde_json::from_value(attestation["quote"].clone())?;
     let measurements = json!({
         "measurements": {
             "rtmrs": {
-                "mrtd": field("mrtd"),
-                "rtmr0": field("rtmr0"),
-                "rtmr1": field("rtmr1"),
-                "rtmr2": field("rtmr2"),
+                "mrtd": field("mrtd")?,
+                "rtmr0": field("rtmr0")?,
+                "rtmr1": field("rtmr1")?,
+                "rtmr2": field("rtmr2")?,
             },
-            "key_provider_event_digest": event["digest"],
-            "app_compose_hash_payload": field("compose_hash"),
+            "key_provider_event_digest": digest,
+            "app_compose_hash_payload": field("compose_hash")?,
         }
     });
     Ok((measurements, json!({ "ppids": [ppid(&quote)?] })))
@@ -283,6 +290,18 @@ pub(crate) mod tests {
         });
         let err = approval_args(&no_key_provider).unwrap_err();
         assert!(err.to_string().contains("found 0"), "{err}");
+
+        // Missing values fail instead of logging empty measurements.
+        let mut missing = attestation.clone();
+        missing["tcb_info"]["rtmr1"] = json!("");
+        let err = approval_args(&missing).unwrap_err();
+        assert!(err.to_string().contains("no rtmr1"), "{err}");
+
+        let mut no_digest = attestation;
+        let events = no_digest["tcb_info"]["event_log"].as_array_mut().unwrap();
+        events.last_mut().unwrap()["digest"] = json!("");
+        let err = approval_args(&no_digest).unwrap_err();
+        assert!(err.to_string().contains("no digest"), "{err}");
     }
 
     #[tokio::test]
