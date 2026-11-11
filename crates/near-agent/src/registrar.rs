@@ -1,13 +1,14 @@
 //! Funds the agent account and keeps it registered with the agent contract.
 
 use crate::{
-    attestation::build_attestation,
+    attestation::{approval_args, build_attestation},
     base58,
     rpc::NearRpc,
     tx::{Action, Transaction},
     AgentConfig, AgentError, SigningKey, Tee,
 };
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
@@ -42,6 +43,8 @@ pub struct Registrar {
     min_balance: u128,
     top_up_balance: u128,
     pccs_endpoints: Vec<String>,
+    /// Approval args are logged on the first attempt of each boot.
+    approval_logged: AtomicBool,
 }
 
 impl Registrar {
@@ -71,6 +74,7 @@ impl Registrar {
             min_balance,
             top_up_balance,
             pccs_endpoints: config.pccs_endpoints(),
+            approval_logged: AtomicBool::new(false),
         })
     }
 
@@ -161,6 +165,9 @@ impl Registrar {
             &self.agent.report_data(),
         )
         .await?;
+        if !self.approval_logged.swap(true, Ordering::Relaxed) {
+            log_approval_args(&attestation);
+        }
         let tx_hash = self
             .send(
                 &self.agent,
@@ -215,6 +222,17 @@ impl Registrar {
             };
             tokio::time::sleep(delay).await;
         }
+    }
+}
+
+/// Logs what the owner must approve for this build to register, ready to pass as
+/// `json-args`. Registration fails until they are approved, so log before sending.
+fn log_approval_args(attestation: &Value) {
+    match approval_args(attestation) {
+        Ok((measurements, ppids)) => info!(
+            "To let this build register, the contract owner calls approve_measurements with {measurements} and approve_ppids with {ppids}"
+        ),
+        Err(e) => warn!("Could not derive approval args from the attestation: {e}"),
     }
 }
 

@@ -1,7 +1,7 @@
 //! Builds the `DstackAttestation` argument for `register_agent`, matching
 //! shade-agent-js's `internalGetAttestation` at shade-agent-framework@35758f3.
 
-use crate::{collateral::fetch_collateral, AgentError};
+use crate::{collateral::fetch_collateral, quote::ppid, AgentError};
 use async_trait::async_trait;
 use dstack_client::{AppInfo, DstackClient};
 use serde_json::{json, Value};
@@ -102,11 +102,51 @@ pub async fn build_attestation(
     }))
 }
 
+/// The `approve_measurements` and `approve_ppids` arguments that would let this
+/// attestation register. All public values, for the contract owner to review.
+pub fn approval_args(attestation: &Value) -> Result<(Value, Value), AgentError> {
+    let tcb = &attestation["tcb_info"];
+    let field = |key: &str| match tcb[key].as_str() {
+        Some(value) if !value.is_empty() => Ok(value.to_string()),
+        _ => Err(AgentError::Tee(format!("tcb_info has no {key}"))),
+    };
+    let key_provider: Vec<&Value> = tcb["event_log"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|e| e["event"] == "key-provider")
+        .collect();
+    let [event] = key_provider.as_slice() else {
+        return Err(AgentError::Tee(format!(
+            "expected one key-provider event, found {}",
+            key_provider.len()
+        )));
+    };
+    let digest = event["digest"]
+        .as_str()
+        .filter(|d| !d.is_empty())
+        .ok_or_else(|| AgentError::Tee("key-provider event has no digest".into()))?;
+    let quote: Vec<u8> = serde_json::from_value(attestation["quote"].clone())?;
+    let measurements = json!({
+        "measurements": {
+            "rtmrs": {
+                "mrtd": field("mrtd")?,
+                "rtmr0": field("rtmr0")?,
+                "rtmr1": field("rtmr1")?,
+                "rtmr2": field("rtmr2")?,
+            },
+            "key_provider_event_digest": digest,
+            "app_compose_hash_payload": field("compose_hash")?,
+        }
+    });
+    Ok((measurements, json!({ "ppids": [ppid(&quote)?] })))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::collateral::tests::mock_pccs;
-    use crate::quote::tests::tdx_quote;
+    use crate::quote::tests::{tdx_quote, PPID};
     use std::sync::Mutex;
     use wiremock::MockServer;
 
@@ -218,6 +258,50 @@ pub(crate) mod tests {
         let bad_event = json!({ "event_log": [{ "imr": "three" }] });
         let err = contract_tcb_info(&bad_event).unwrap_err();
         assert!(err.to_string().contains("no imr"));
+    }
+
+    #[test]
+    fn derives_approval_args() {
+        let mut tcb = dstack_tcb_info();
+        let key_provider = json!({
+            "imr": 3, "event_type": 134217729, "digest": "kp",
+            "event": "key-provider", "event_payload": ""
+        });
+        tcb["event_log"].as_array_mut().unwrap().push(key_provider);
+        let attestation = json!({
+            "quote": tdx_quote("Intel SGX PCK Platform CA"),
+            "tcb_info": contract_tcb_info(&tcb).unwrap(),
+        });
+
+        let (measurements, ppids) = approval_args(&attestation).unwrap();
+        assert_eq!(
+            measurements,
+            json!({ "measurements": {
+                "rtmrs": { "mrtd": "aa", "rtmr0": "b0", "rtmr1": "b1", "rtmr2": "b2" },
+                "key_provider_event_digest": "kp",
+                "app_compose_hash_payload": "cc"
+            }})
+        );
+        assert_eq!(ppids, json!({ "ppids": [hex::encode(PPID)] }));
+
+        let no_key_provider = json!({
+            "quote": tdx_quote("Intel SGX PCK Platform CA"),
+            "tcb_info": contract_tcb_info(&dstack_tcb_info()).unwrap(),
+        });
+        let err = approval_args(&no_key_provider).unwrap_err();
+        assert!(err.to_string().contains("found 0"), "{err}");
+
+        // Missing values fail instead of logging empty measurements.
+        let mut missing = attestation.clone();
+        missing["tcb_info"]["rtmr1"] = json!("");
+        let err = approval_args(&missing).unwrap_err();
+        assert!(err.to_string().contains("no rtmr1"), "{err}");
+
+        let mut no_digest = attestation;
+        let events = no_digest["tcb_info"]["event_log"].as_array_mut().unwrap();
+        events.last_mut().unwrap()["digest"] = json!("");
+        let err = approval_args(&no_digest).unwrap_err();
+        assert!(err.to_string().contains("no digest"), "{err}");
     }
 
     #[tokio::test]
