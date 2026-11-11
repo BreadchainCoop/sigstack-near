@@ -30,6 +30,9 @@ const SPONSOR_LOW_BALANCE: u128 = 1_000_000_000_000_000_000_000_000;
 /// Smallest excess (0.001 NEAR) worth returning to the sponsor; below it the relay's gas
 /// isn't worth spending.
 const MIN_RETURN: u128 = 1_000_000_000_000_000_000_000;
+/// Kept back from a returned excess (0.0001 NEAR) for the transfer's own gas, which the
+/// agent pays: a transfer burns about 0.00005 NEAR.
+const RETURN_GAS_RESERVE: u128 = 100_000_000_000_000_000_000;
 
 /// Re-register at most this long before the registration expires.
 const MAX_REFRESH_MARGIN: Duration = Duration::from_secs(24 * 60 * 60);
@@ -162,17 +165,26 @@ impl Registrar {
         Ok(())
     }
 
-    /// Sends `amount` from the agent back to the sponsor, relayed so the sponsor pays gas.
-    async fn return_excess(&self, amount: u128) {
-        let sponsor_id = self.sponsor_id.clone();
-        match self
-            .relay(&sponsor_id, Action::Transfer { deposit: amount })
-            .await
-        {
+    /// Sends `excess` (less gas) from the agent back to the sponsor, in a transaction the
+    /// agent signs and pays for. It can't be relayed: NEP-366 charges the deposits inside a
+    /// relayed call to the relayer, so the sponsor would only be paying itself.
+    async fn return_excess(&self, excess: u128) {
+        let amount = excess - RETURN_GAS_RESERVE;
+        let account_id = self.account_id();
+        let sent = self
+            .send(
+                &self.agent,
+                &account_id,
+                &self.sponsor_id,
+                Action::Transfer { deposit: amount },
+            )
+            .await;
+        match sent {
             Ok(tx_hash) => info!(
-                "Returned {amount} yoctoNEAR of refunded deposit to {sponsor_id} (tx {tx_hash})"
+                "Returned {amount} yoctoNEAR of refunded deposit to {} (tx {tx_hash})",
+                self.sponsor_id
             ),
-            Err(e) => warn!("Could not return {amount} yoctoNEAR to {sponsor_id}: {e}"),
+            Err(e) => warn!("Could not return {amount} yoctoNEAR to {}: {e}", self.sponsor_id),
         }
     }
 
@@ -572,20 +584,19 @@ mod tests {
     }
 
     // A failed relayed call refunded its deposit to the agent: the excess goes back to the
-    // sponsor, signed by the agent and relayed by the sponsor.
+    // sponsor.
     #[tokio::test]
     async fn refunded_excess_returns_to_the_sponsor() {
         let f = fixture(Some(NEAR * 8 / 1000), Value::Null).await;
         f.registrar.ensure_funded().await.unwrap();
 
+        // Signed and paid by the agent itself, not relayed: a relayed transfer's deposit
+        // would come out of the sponsor.
         let sent = sent_transactions(&f.server).await;
         assert_eq!(sent.len(), 1);
-        assert_eq!(signer(&sent[0]), "sponsor.testnet");
-        let (delegate, _) = relayed_delegate(&sent[0]);
-        assert!(contains(&delegate, f.agent_id.as_bytes()));
-        assert!(contains(&delegate, b"sponsor.testnet"));
-        let transfer = [&[3u8][..], &(NEAR * 5 / 1000).to_le_bytes()[..]].concat();
-        assert!(contains(&delegate, &transfer));
+        assert_eq!(signer(&sent[0]), f.agent_id);
+        assert!(contains(&sent[0], b"sponsor.testnet"));
+        assert_eq!(deposit(&sent[0]), NEAR * 5 / 1000 - RETURN_GAS_RESERVE);
     }
 
     // A low sponsor only warns; registration goes ahead while it can still pay.
