@@ -24,14 +24,15 @@ pub struct AgentConfig {
     #[serde(default)]
     pub sponsor_private_key: String,
 
-    /// Top up the agent account when its balance drops below this (NEAR). A
-    /// transaction must cover its full prepaid gas up front: `register_agent`'s 300 Tgas
-    /// is about 0.31 NEAR on testnet (unused gas is refunded), plus the 0.005 deposit.
+    /// Top up the agent account when its balance drops below this (NEAR). The sponsor
+    /// relays `register_agent` and pays its gas and deposit, so the agent account only
+    /// needs its own storage: about 0.0018 NEAR for an implicit account with one key.
     #[serde(default = "default_min_balance")]
     pub min_balance: String,
 
-    /// ...to this balance (NEAR). Covers the account's storage, the registration
-    /// deposit, the prepaid gas, and a few weekly re-registrations (~0.02 NEAR burnt each).
+    /// ...to this balance (NEAR). This much is stranded when the boot's key goes away.
+    /// The sponsor separately needs about 0.31 NEAR on hand per registration for the
+    /// prepaid gas (refunded, minus ~0.02 NEAR burnt) plus the first 0.005 deposit.
     #[serde(default = "default_top_up_balance")]
     pub top_up_balance: String,
 
@@ -143,11 +144,11 @@ fn default_rpc_url() -> String {
 }
 
 fn default_min_balance() -> String {
-    "0.35".into()
+    "0.002".into()
 }
 
 fn default_top_up_balance() -> String {
-    "0.5".into()
+    "0.003".into()
 }
 
 fn default_pccs_urls() -> String {
@@ -205,7 +206,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             cfg.balances().unwrap(),
-            (YOCTO_PER_NEAR * 7 / 20, YOCTO_PER_NEAR / 2)
+            (YOCTO_PER_NEAR * 2 / 1000, YOCTO_PER_NEAR * 3 / 1000)
         );
         assert!(config().enabled());
     }
@@ -232,7 +233,7 @@ pub(crate) mod tests {
         assert!(cfg.validate().unwrap_err().to_string().contains("PCCS"));
 
         let mut cfg = config();
-        cfg.top_up_balance = "0.05".into();
+        cfg.top_up_balance = "0.001".into();
         assert!(cfg.validate().unwrap_err().to_string().contains("TOP_UP"));
 
         let mut cfg = config();

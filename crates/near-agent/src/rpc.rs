@@ -17,6 +17,8 @@ pub struct NearRpc {
 pub struct AccessKeyInfo {
     pub nonce: u64,
     pub block_hash: [u8; 32],
+    /// Height of the block the key was read at; bounds a delegate action's lifetime.
+    pub block_height: u64,
 }
 
 impl NearRpc {
@@ -97,7 +99,15 @@ impl NearRpc {
             .and_then(base58::decode)
             .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
             .ok_or_else(|| AgentError::Rpc("access key query has no valid block_hash".into()))?;
-        Ok(Some(AccessKeyInfo { nonce, block_hash }))
+        let block_height = result
+            .get("block_height")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| AgentError::Rpc("access key query has no block_height".into()))?;
+        Ok(Some(AccessKeyInfo {
+            nonce,
+            block_hash,
+            block_height,
+        }))
     }
 
     /// Liquid balance in yoctoNEAR; `None` if the account doesn't exist.
@@ -206,7 +216,12 @@ mod tests {
         respond(
             &server,
             json!({ "params": { "request_type": "view_access_key", "account_id": "a.testnet" } }),
-            result(json!({ "nonce": 42, "block_hash": base58::encode(&hash), "permission": "FullAccess" })),
+            result(json!({
+                "nonce": 42,
+                "block_hash": base58::encode(&hash),
+                "block_height": 77,
+                "permission": "FullAccess"
+            })),
         )
         .await;
         respond(
@@ -227,7 +242,8 @@ mod tests {
             rpc.access_key("a.testnet", "ed25519:x").await.unwrap(),
             Some(AccessKeyInfo {
                 nonce: 42,
-                block_hash: hash
+                block_hash: hash,
+                block_height: 77
             })
         );
         assert_eq!(
