@@ -99,9 +99,7 @@ impl Registrar {
         self.rpc
             .access_key(account_id, &public_key)
             .await?
-            .ok_or_else(|| {
-                AgentError::Rpc(format!("{account_id} has no access key {public_key}"))
-            })
+            .ok_or_else(|| AgentError::Rpc(format!("{account_id} has no access key {public_key}")))
     }
 
     /// Signs and sends a one-action transaction; returns its base58 hash.
