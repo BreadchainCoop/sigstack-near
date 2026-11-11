@@ -400,7 +400,7 @@ mod tests {
         let sent = sent_transactions(&f.server).await;
         assert_eq!(sent.len(), 1);
         assert_eq!(signer(&sent[0]), "sponsor.testnet");
-        assert_eq!(deposit(&sent[0]), NEAR / 10);
+        assert_eq!(deposit(&sent[0]), NEAR / 2);
         assert!(contains(&sent[0], f.agent_id.as_bytes()));
     }
 
@@ -444,7 +444,7 @@ mod tests {
         f.registrar.ensure_funded().await.unwrap();
         let sent = sent_transactions(&f.server).await;
         assert_eq!(sent.len(), 1);
-        assert_eq!(deposit(&sent[0]), NEAR / 10 - NEAR / 100);
+        assert_eq!(deposit(&sent[0]), NEAR / 2 - NEAR / 100);
     }
 
     #[tokio::test]
