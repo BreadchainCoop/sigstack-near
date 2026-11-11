@@ -458,8 +458,10 @@ mod tests {
             .await
             .unwrap()
             .iter()
+            .filter(|r| r.url.path() == "/v2/send")
             .map(|r| serde_json::from_slice(&r.body).unwrap())
             .collect();
+        assert_eq!(bodies.len(), 2);
         assert_eq!(bodies[0]["message"], "**first**");
         assert_eq!(bodies[1]["message"], "second");
         assert!(bodies.iter().all(|b| b["text_mode"] == "styled"));
