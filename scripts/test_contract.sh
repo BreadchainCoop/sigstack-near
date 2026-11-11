@@ -17,7 +17,9 @@ echo "== Unit tests"
 cargo test --lib --locked
 
 echo "== Building the contract wasm in $IMAGE"
-# The image runs as its own user: open target/ to it, then hand it back.
+# The image runs as its own user: open target/ to it, then hand it back. If this chmod
+# fails, target/ has root-owned files from an older sudo-based build; reclaim it once
+# with: sudo chown -R "$(id -u):$(id -g)" contracts/agent/target
 mkdir -p target
 chmod -R a+rwX target
 docker run --rm -v "$PWD":/workspace -w /workspace "$IMAGE" \
