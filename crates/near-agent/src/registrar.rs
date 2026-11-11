@@ -184,7 +184,10 @@ impl Registrar {
                 "Returned {amount} yoctoNEAR of refunded deposit to {} (tx {tx_hash})",
                 self.sponsor_id
             ),
-            Err(e) => warn!("Could not return {amount} yoctoNEAR to {}: {e}", self.sponsor_id),
+            Err(e) => warn!(
+                "Could not return {amount} yoctoNEAR to {}: {e}",
+                self.sponsor_id
+            ),
         }
     }
 
