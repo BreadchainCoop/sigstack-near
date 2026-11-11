@@ -141,9 +141,9 @@ The deployed code is traceable to this repo:
   `near account view-account-summary agent.sigstack.testnet network-config testnet now`.
 
 The demo bot is registered. At the time of writing, its agent account is
-[`fc4eab36…ed09`](https://testnet.nearblocks.io/address/fc4eab36025511614cb85730f56e7bdcd32bd2d4c08082e855c884255178ed09),
+[`09aa1d38…7945`](https://testnet.nearblocks.io/address/09aa1d3806f2d0af0f27909a7caac83ab7ba3ef1a41b7175be582cebf7557945),
 registered in
-[`BwDXT1Jd…rpPkq`](https://testnet.nearblocks.io/txns/BwDXT1Jd5kJJy44EdkoSccFmFjkS1asZdjxnxtHrpPkq),
+[`CUBWQXr2…Zhq4`](https://testnet.nearblocks.io/txns/CUBWQXr2hVjQfxBbZnrsRX7i3dmFqCUY9RPLxUDBZhq4),
 relayed by the sponsor as a NEP-366 meta-transaction.
 The bot makes a new key on every boot, so after a restart the current one is the newest entry in
 `get_agents`. Registration lasts 7 days, and the bot re-registers before it expires.
@@ -152,7 +152,7 @@ To tie the registered bot to this repo:
 
 1. In `get_agents`, its `measurements.app_compose_hash_payload` is the compose hash the contract
    checked against the TDX quote. For the demo it is
-   `05be66bc30f35a0387ae933b98e35f6a4830dcc45d80481312208fba75fdc947`.
+   `0634364c719686c10c774bbfd9ea051303f393a6b36452e5c475104bf8fe5a70`.
 2. That hash is the sha256 of
    [`docker/phala-demo.app-compose.json`](docker/phala-demo.app-compose.json), which wraps
    [`docker/phala-demo.yaml`](docker/phala-demo.yaml) unchanged. See
@@ -171,7 +171,7 @@ The bot answers with two messages. The first has:
   quote's report data.
 - **Report data:** the challenge in hex. Check it with
   `printf '%s' 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
-- **Compose hash:** should be `05be66bc…c947`, the same as above.
+- **Compose hash:** should be `0634364c…5a70`, the same as above.
 - **How to verify:** the same three checks as here, with links to the verifier page and this repo.
 
 The second message is the TDX quote alone. Long-press it, copy it, and paste it into
