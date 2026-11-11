@@ -18,33 +18,35 @@ const TYPING_REFRESH: Duration = Duration::from_secs(10);
 struct Typing(Option<JoinHandle<()>>);
 
 impl Typing {
-    /// Turns the indicator on before the handler runs, then keeps it on in the background.
-    async fn start(signal: &SignalClient, message: &BotMessage) -> Self {
+    /// Turns the indicator on and keeps it on, all in the background: a Signal API call can
+    /// take seconds, and the handler shouldn't wait for one before it starts.
+    fn start(signal: &SignalClient, message: &BotMessage) -> Self {
         if !message.text.trim_start().starts_with('!') {
-            return Self(None);
-        }
-        if let Err(e) = signal.set_typing(message, true).await {
-            debug!("Typing indicator failed: {e}");
             return Self(None);
         }
         let (signal, message) = (signal.clone(), message.clone());
         Self(Some(tokio::spawn(async move {
             loop {
-                tokio::time::sleep(TYPING_REFRESH).await;
-                if signal.set_typing(&message, true).await.is_err() {
+                if let Err(e) = signal.set_typing(&message, true).await {
+                    debug!("Typing indicator failed: {e}");
                     return;
                 }
+                tokio::time::sleep(TYPING_REFRESH).await;
             }
         })))
     }
 
-    /// Stops refreshing and clears the indicator.
-    async fn stop(self, signal: &SignalClient, message: &BotMessage) {
+    /// Stops refreshing and clears the indicator in the background, so the next message
+    /// isn't held up either.
+    fn stop(self, signal: &SignalClient, message: &BotMessage) {
         if let Some(refresh) = self.0 {
             refresh.abort();
-            if let Err(e) = signal.set_typing(message, false).await {
-                debug!("Clearing typing indicator failed: {e}");
-            }
+            let (signal, message) = (signal.clone(), message.clone());
+            tokio::spawn(async move {
+                if let Err(e) = signal.set_typing(&message, false).await {
+                    debug!("Clearing typing indicator failed: {e}");
+                }
+            });
         }
     }
 }
@@ -153,10 +155,10 @@ pub async fn dispatch_message(
         };
     }
 
-    let typing = Typing::start(signal, message).await;
+    let typing = Typing::start(signal, message);
     let outcome =
         execute_and_reply(handler.as_ref(), signal, message, quote_reply, own_reply).await;
-    typing.stop(signal, message).await;
+    typing.stop(signal, message);
     outcome
 }
 
@@ -467,11 +469,40 @@ mod tests {
         assert!(bodies.iter().all(|b| b["text_mode"] == "styled"));
     }
 
-    // A command shows the typing indicator before running and clears it after replying.
+    /// Polls the mock until `pred` holds for its requests, for up to a second.
+    async fn eventually(server: &MockServer, pred: impl Fn(&[(String, String)]) -> bool) -> bool {
+        for _ in 0..50 {
+            if pred(&received(server).await) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        false
+    }
+
+    // The guard turns typing on, then clears it once stopped.
     #[tokio::test]
-    async fn commands_type_while_running() {
+    async fn typing_guard_turns_on_then_clears() {
         let (server, signal) = signal_mock().await;
         mount_typing(&server).await;
+        let message = dm("!verify x");
+
+        let typing = Typing::start(&signal, &message);
+        assert!(eventually(&server, |r| r.iter().any(|(m, _)| m == "PUT")).await);
+        typing.stop(&signal, &message);
+        assert!(eventually(&server, |r| r.iter().any(|(m, _)| m == "DELETE")).await);
+    }
+
+    // A slow Signal API (seconds per call in signal-cli's normal mode) must not delay the
+    // reply: the typing call runs in the background.
+    #[tokio::test]
+    async fn slow_typing_does_not_delay_the_reply() {
+        let (server, signal) = signal_mock().await;
+        Mock::given(method("PUT"))
+            .and(path("/v1/typing-indicator/%2B15550001111"))
+            .respond_with(ResponseTemplate::new(204).set_delay(Duration::from_secs(5)))
+            .mount(&server)
+            .await;
         Mock::given(method("POST"))
             .and(path("/v2/send"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
@@ -488,17 +519,18 @@ mod tests {
             calls: Arc::new(AtomicUsize::new(0)),
         })];
         let identity = BotIdentity::new();
-        dispatch_message(&handlers, &signal, &identity, &dm("!help"), &open_gate()).await;
+        let started = std::time::Instant::now();
+        let outcome =
+            dispatch_message(&handlers, &signal, &identity, &dm("!help"), &open_gate()).await;
 
-        let typing = "/v1/typing-indicator/%2B15550001111".to_string();
-        assert_eq!(
-            received(&server).await,
-            vec![
-                ("PUT".to_string(), typing.clone()),
-                ("POST".to_string(), "/v2/send".to_string()),
-                ("DELETE".to_string(), typing),
-            ]
-        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(matches!(
+            outcome,
+            DispatchOutcome::Matched {
+                sent_reply: true,
+                ..
+            }
+        ));
     }
 
     // Ordinary messages that reach a handler don't make the bot look like it's typing.
