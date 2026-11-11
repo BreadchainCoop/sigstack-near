@@ -358,8 +358,14 @@ mod tests {
 
         let handlers: Vec<Box<dyn CommandHandler>> = vec![Box::new(TwoPartHandler)];
         let identity = BotIdentity::new();
-        let outcome =
-            dispatch_message(&handlers, &signal, &identity, &dm("!verify x"), &open_gate()).await;
+        let outcome = dispatch_message(
+            &handlers,
+            &signal,
+            &identity,
+            &dm("!verify x"),
+            &open_gate(),
+        )
+        .await;
         assert!(matches!(
             outcome,
             DispatchOutcome::Matched {
