@@ -17,8 +17,8 @@ pub const REGISTER_GAS: u64 = 300_000_000_000_000;
 /// 0.005 NEAR covers the contract's storage for a new agent (486 bytes).
 pub const REGISTER_DEPOSIT: u128 = 5_000_000_000_000_000_000_000;
 
-/// Re-register this long before the registration expires.
-const REFRESH_MARGIN: Duration = Duration::from_secs(24 * 60 * 60);
+/// Re-register at most this long before the registration expires.
+const MAX_REFRESH_MARGIN: Duration = Duration::from_secs(24 * 60 * 60);
 const MIN_REFRESH_DELAY: Duration = Duration::from_secs(10 * 60);
 const MIN_RETRY_DELAY: Duration = Duration::from_secs(30);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30 * 60);
@@ -178,8 +178,8 @@ impl Registrar {
         let valid_until_ms = self
             .agent_view()
             .await?
-            .and_then(|view| view.get("valid_until_ms").cloned())
-            .and_then(|v| v.as_str().and_then(|s| s.parse().ok()))
+            .as_ref()
+            .and_then(parse_valid_until)
             .ok_or_else(|| {
                 AgentError::Rpc(format!(
                     "get_agent has no valid_until_ms after tx {tx_hash}"
@@ -225,10 +225,20 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Time until `REFRESH_MARGIN` before expiry, but at least `MIN_REFRESH_DELAY`.
+/// The contract returns `valid_until_ms` as a `U64` string; accept a number too.
+fn parse_valid_until(view: &Value) -> Option<u64> {
+    match view.get("valid_until_ms")? {
+        Value::String(s) => s.parse().ok(),
+        v => v.as_u64(),
+    }
+}
+
+/// Re-register `min(validity / 2, MAX_REFRESH_MARGIN)` before expiry, so a short
+/// contract validity can't turn into a re-register every `MIN_REFRESH_DELAY`.
 pub(crate) fn refresh_delay(valid_until_ms: u64, now_ms: u64) -> Duration {
-    let refresh_at = valid_until_ms.saturating_sub(REFRESH_MARGIN.as_millis() as u64);
-    Duration::from_millis(refresh_at.saturating_sub(now_ms)).max(MIN_REFRESH_DELAY)
+    let validity = valid_until_ms.saturating_sub(now_ms);
+    let margin = (validity / 2).min(MAX_REFRESH_MARGIN.as_millis() as u64);
+    Duration::from_millis(validity - margin).max(MIN_REFRESH_DELAY)
 }
 
 pub(crate) fn next_retry(delay: Duration) -> Duration {
@@ -465,14 +475,28 @@ mod tests {
     }
 
     #[test]
-    fn refreshes_a_day_before_expiry() {
-        let day = 24 * 60 * 60 * 1000;
+    fn refreshes_before_expiry() {
+        let hour = 60 * 60 * 1000;
+        let day = 24 * hour;
+        // Week-long validity: a day before expiry.
         assert_eq!(
             refresh_delay(10 * day, 3 * day),
             Duration::from_millis(6 * day)
         );
-        assert_eq!(refresh_delay(day, 0), MIN_REFRESH_DELAY);
+        // Short validity: halfway through, not every ten minutes.
+        assert_eq!(refresh_delay(day, 0), Duration::from_millis(12 * hour));
+        assert_eq!(refresh_delay(4 * hour, 0), Duration::from_millis(2 * hour));
+        assert_eq!(refresh_delay(10 * 60 * 1000, 0), MIN_REFRESH_DELAY);
         assert_eq!(refresh_delay(0, 5 * day), MIN_REFRESH_DELAY);
+    }
+
+    #[test]
+    fn reads_valid_until_as_string_or_number() {
+        let parse = |v: Value| parse_valid_until(&v);
+        assert_eq!(parse(json!({ "valid_until_ms": "123" })), Some(123));
+        assert_eq!(parse(json!({ "valid_until_ms": 123 })), Some(123));
+        assert_eq!(parse(json!({ "valid_until_ms": "soon" })), None);
+        assert_eq!(parse(json!({})), None);
     }
 
     #[test]

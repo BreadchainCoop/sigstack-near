@@ -3,7 +3,6 @@
 
 use crate::{collateral::fetch_collateral, AgentError};
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD, Engine};
 use dstack_client::{AppInfo, DstackClient};
 use serde_json::{json, Value};
 
@@ -36,13 +35,12 @@ pub(crate) fn tcb_info_from_app_info(info: AppInfo) -> Result<Value, AgentError>
     }
 }
 
-/// dstack returns the quote hex-encoded; older guest agents used base64.
+/// dstack returns the quote hex-encoded. Hex only: a base64 fallback could
+/// silently mis-decode a base64 string that happens to look like hex.
 pub(crate) fn decode_quote(quote: &str) -> Result<Vec<u8>, AgentError> {
     let quote = quote.trim();
-    let hex_part = quote.strip_prefix("0x").unwrap_or(quote);
-    hex::decode(hex_part)
-        .or_else(|_| STANDARD.decode(quote))
-        .map_err(|_| AgentError::Tee("quote is neither hex nor base64".into()))
+    hex::decode(quote.strip_prefix("0x").unwrap_or(quote))
+        .map_err(|_| AgentError::Tee("quote is not hex".into()))
 }
 
 /// Maps dstack's `tcb_info` to the contract's `TcbInfo`, keeping only its fields.
@@ -95,6 +93,8 @@ pub async fn build_attestation(
     let tcb_info = contract_tcb_info(&tee.tcb_info().await?)?;
     let quote = tee.quote(report_data).await?;
     let collateral = fetch_collateral(http, pccs_endpoints, &quote).await?;
+    // `quote` serializes as a JSON array of bytes: the contract's `QuoteBytes(Vec<u8>)`
+    // derives serde, and shade-agent-js sends `number[]` the same way.
     Ok(json!({
         "quote": quote,
         "collateral": collateral,
@@ -179,10 +179,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn decodes_hex_or_base64_quotes() {
+    fn decodes_hex_quotes_only() {
         assert_eq!(decode_quote("0a0b").unwrap(), [0x0a, 0x0b]);
         assert_eq!(decode_quote(" 0x0a0b\n").unwrap(), [0x0a, 0x0b]);
-        assert_eq!(decode_quote("cXVvdGU=").unwrap(), b"quote");
+        assert!(decode_quote("cXVvdGU=").is_err());
         assert!(decode_quote("!!").is_err());
     }
 
