@@ -8,7 +8,8 @@ use shade_attestation::{
 };
 
 // Most tests use requires_tee = false, since unit tests cannot produce a real TDX quote.
-// The requires_tee = true tests cover the checks a quote can't get past without one.
+// The requires_tee = true tests cover the checks a quote can't get past without one, and
+// replay a real quote recorded from the demo bot (see "TEE mode with a real quote").
 
 // Deposit constants for tests
 const DEPOSIT_005_NEAR: NearToken = NearToken::from_yoctonear(5_000_000_000_000_000_000_000); // 0.005 NEAR
@@ -898,4 +899,139 @@ fn test_tee_register_rejects_mock_attestation() {
 fn test_tee_whitelist_is_rejected() {
     let mut contract = setup_tee_contract();
     contract.whitelist_agent_for_local(accounts(2));
+}
+
+// -------- TEE mode with a real quote --------
+//
+// `tests/fixtures/demo_register_agent.json` holds the exact arguments the demo bot sent to
+// `register_agent` on agent.sigstack.testnet, in transaction
+// 4zqtSnqZu3t8UDoJonqtzrrhdPk96KeFC8BJCWe3KRRW: a real TDX quote from Phala Cloud, the PCCS
+// collateral the bot fetched, and dstack's tcb_info. The quote verifies only against Intel's
+// root of trust, so these tests run the full verification path without a TEE. The block
+// timestamp is set to when that transaction executed, which keeps the collateral in date.
+
+const DEMO_REGISTER_ARGS: &str = include_str!("../../tests/fixtures/demo_register_agent.json");
+
+// The implicit account whose ID the quote's report data binds.
+const DEMO_AGENT: &str = "b0c2f7e3b2e49476e99d8219703fa414bfb65d3b0077cf3a048662029ef46476";
+
+// Block timestamp of the receipt that executed `register_agent`, in ms.
+const DEMO_REGISTERED_AT_MS: u64 = 1_794_424_965_344;
+
+// What the owner approved for the demo build (logged by the bot, checked against Phala's
+// attestation before approving).
+const DEMO_MEASUREMENTS: &str = r#"{
+    "rtmrs": {
+        "mrtd": "7fe60787222bd394cb516abca2435f22f035ab2cc9c0a4b4b3b148e46297f3d931a237b72f359052c6e657d8c1409173",
+        "rtmr0": "027b610ab0555482f8a3868524093bdf3cdbe2539f81dfeeb886864654cb2fe3422f7fc36d4bab6fa46683aad11d1ba7",
+        "rtmr1": "4ae609807c765916a31d724786ed74bcb97e168a9d937b04936aeef2015c907eba5ac352c6bcd749c246fd62ffb659ec",
+        "rtmr2": "80e945df96ec417b68d574dba18d199a7448d66c3d0e56f073167a9513d2381601f5d614853646d2c49c5d8d58a7daf5"
+    },
+    "key_provider_event_digest": "1de9cfa982eab350c1c6719fed6f35f9be554d202c26d354e498b0b9e6ad2e6e1e02df3abfa85bd8113c9ea219c16deb",
+    "app_compose_hash_payload": "a949c1ffaf5aede815321e6a3fc7bb4190637522f38bb841ff13fe50051b507d"
+}"#;
+const DEMO_PPID: &str = "\"3e306e133b7fdaa7bb79f67634cb520c\"";
+
+const SEVEN_DAYS_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
+fn demo_attestation() -> DstackAttestation {
+    let args: near_sdk::serde_json::Value =
+        near_sdk::serde_json::from_str(DEMO_REGISTER_ARGS).unwrap();
+    near_sdk::serde_json::from_value(args["attestation"].clone()).unwrap()
+}
+
+fn demo_measurements() -> FullMeasurementsHex {
+    near_sdk::serde_json::from_str(DEMO_MEASUREMENTS).unwrap()
+}
+
+fn demo_ppid() -> Ppid {
+    near_sdk::serde_json::from_str(DEMO_PPID).unwrap()
+}
+
+// TEE mode with nothing approved yet; each test approves what it needs.
+fn setup_demo_contract() -> Contract {
+    let owner = accounts(0);
+    testing_env!(get_context(owner.clone(), false).build());
+    Contract::new(true, U64::from(SEVEN_DAYS_MS), owner)
+}
+
+// Calls register_agent with the demo attestation as `caller`, at `at_ms`.
+fn register_demo(contract: &mut Contract, caller: &str, at_ms: u64) -> bool {
+    let context = get_context_with_deposit_and_timestamp(
+        caller.parse().unwrap(),
+        false,
+        Some(DEPOSIT_005_NEAR),
+        Some(at_ms),
+    );
+    testing_env!(context.build());
+    contract.register_agent(demo_attestation())
+}
+
+// The demo's registration replays: with its build and PPID approved, the real quote verifies
+// and the agent is valid for 7 days with the measurements it attested.
+#[test]
+fn test_tee_register_demo_quote() {
+    let mut contract = setup_demo_contract();
+    contract.approve_measurements(demo_measurements());
+    contract.approve_ppids(vec![demo_ppid()]);
+
+    let registered = register_demo(&mut contract, DEMO_AGENT, DEMO_REGISTERED_AT_MS);
+    assert!(registered);
+
+    let agent = contract.get_agent(DEMO_AGENT.parse().unwrap()).unwrap();
+    assert!(matches!(agent.validity, AgentValidity::Valid));
+    assert_eq!(agent.measurements, demo_measurements());
+    assert_eq!(agent.ppid, demo_ppid());
+    assert_eq!(
+        agent.valid_until_ms,
+        U64::from(DEMO_REGISTERED_AT_MS + SEVEN_DAYS_MS)
+    );
+}
+
+// The quote's report data names the demo agent's account, so anyone else replaying it is
+// rejected, even with the build and PPID approved.
+#[test]
+#[should_panic(expected = "wrong report_data hash")]
+fn test_tee_demo_quote_rejects_other_account() {
+    let mut contract = setup_demo_contract();
+    contract.approve_measurements(demo_measurements());
+    contract.approve_ppids(vec![demo_ppid()]);
+
+    let other = "ab".repeat(32);
+    register_demo(&mut contract, &other, DEMO_REGISTERED_AT_MS);
+}
+
+// A genuine quote from a build the owner hasn't approved is rejected.
+#[test]
+#[should_panic(expected = "wrong expected_measurements hash")]
+fn test_tee_demo_quote_rejects_unapproved_build() {
+    let mut contract = setup_demo_contract();
+    contract.approve_measurements(non_default_measurements());
+    contract.approve_ppids(vec![demo_ppid()]);
+
+    register_demo(&mut contract, DEMO_AGENT, DEMO_REGISTERED_AT_MS);
+}
+
+// A genuine quote from hardware whose PPID isn't approved is rejected.
+#[test]
+#[should_panic(expected = "is not in the allowed PPIDs list")]
+fn test_tee_demo_quote_rejects_unapproved_ppid() {
+    let mut contract = setup_demo_contract();
+    contract.approve_measurements(demo_measurements());
+    contract.approve_ppids(vec![non_default_ppid()]);
+
+    register_demo(&mut contract, DEMO_AGENT, DEMO_REGISTERED_AT_MS);
+}
+
+// Collateral has a validity window, so an old quote and collateral can't be replayed
+// indefinitely: 90 days later the same arguments fail DCAP verification.
+#[test]
+#[should_panic(expected = "dcap verification failed")]
+fn test_tee_demo_quote_rejects_stale_collateral() {
+    let mut contract = setup_demo_contract();
+    contract.approve_measurements(demo_measurements());
+    contract.approve_ppids(vec![demo_ppid()]);
+
+    let ninety_days_later = DEMO_REGISTERED_AT_MS + 90 * 24 * 60 * 60 * 1000;
+    register_demo(&mut contract, DEMO_AGENT, ninety_days_later);
 }
