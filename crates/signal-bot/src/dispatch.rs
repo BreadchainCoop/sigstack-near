@@ -507,7 +507,10 @@ mod tests {
     #[tokio::test]
     async fn dropped_typing_guard_stops_refreshing() {
         let (server, signal) = signal_mock().await;
-        mount_typing(&server).await;
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
         let typing = Typing::start(&signal, &dm("!verify x"));
         let refresh = typing.0.as_ref().unwrap().abort_handle();
 
