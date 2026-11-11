@@ -1,10 +1,15 @@
-//! Funds the agent account and keeps it registered with the agent contract.
+//! Creates the agent account and keeps it registered with the agent contract.
+//!
+//! The agent signs `register_agent` as a NEP-366 delegate action and the sponsor relays
+//! it, paying the gas and the storage deposit. The agent account only has to exist, so
+//! each boot's account holds a few thousandths of a NEAR, not the ~0.31 NEAR of prepaid
+//! gas a transaction it signed itself would need.
 
 use crate::{
     attestation::{approval_args, build_attestation},
     base58,
-    rpc::NearRpc,
-    tx::{Action, Transaction},
+    rpc::{AccessKeyInfo, NearRpc},
+    tx::{Action, DelegateAction, Transaction},
     AgentConfig, AgentError, SigningKey, Tee,
 };
 use serde_json::{json, Value};
@@ -17,6 +22,8 @@ use tracing::{info, warn};
 pub const REGISTER_GAS: u64 = 300_000_000_000_000;
 /// 0.005 NEAR covers the contract's storage for a new agent (486 bytes).
 pub const REGISTER_DEPOSIT: u128 = 5_000_000_000_000_000_000_000;
+/// How many blocks (about a second each) a signed delegate action stays valid.
+const DELEGATE_TTL_BLOCKS: u64 = 100;
 
 /// Re-register at most this long before the registration expires.
 const MAX_REFRESH_MARGIN: Duration = Duration::from_secs(24 * 60 * 60);
@@ -83,6 +90,18 @@ impl Registrar {
         self.agent.implicit_account_id()
     }
 
+    async fn access(
+        &self,
+        key: &SigningKey,
+        account_id: &str,
+    ) -> Result<AccessKeyInfo, AgentError> {
+        let public_key = key.public_key_string();
+        self.rpc
+            .access_key(account_id, &public_key)
+            .await?
+            .ok_or_else(|| AgentError::Rpc(format!("{account_id} has no access key {public_key}")))
+    }
+
     /// Signs and sends a one-action transaction; returns its base58 hash.
     async fn send(
         &self,
@@ -91,14 +110,7 @@ impl Registrar {
         receiver_id: &str,
         action: Action,
     ) -> Result<String, AgentError> {
-        let public_key = key.public_key_string();
-        let access = self
-            .rpc
-            .access_key(signer_id, &public_key)
-            .await?
-            .ok_or_else(|| {
-                AgentError::Rpc(format!("{signer_id} has no access key {public_key}"))
-            })?;
+        let access = self.access(key, signer_id).await?;
         let signed = Transaction {
             signer_id: signer_id.to_string(),
             public_key: key.public_key(),
@@ -112,8 +124,9 @@ impl Registrar {
         Ok(base58::encode(&signed.hash))
     }
 
-    /// Tops the agent account up from the sponsor when it runs low. The first
-    /// transfer creates the implicit account.
+    /// Creates the agent's implicit account with a transfer from the sponsor, or tops it
+    /// up if it has dropped below `min_balance`. The agent pays for nothing itself, so
+    /// this only has to cover the account's storage.
     pub async fn ensure_funded(&self) -> Result<(), AgentError> {
         let account_id = self.account_id();
         let balance = self.rpc.balance(&account_id).await?.unwrap_or(0);
@@ -168,19 +181,13 @@ impl Registrar {
         if !self.approval_logged.swap(true, Ordering::Relaxed) {
             log_approval_args(&attestation);
         }
-        let tx_hash = self
-            .send(
-                &self.agent,
-                &account_id,
-                &self.contract_id,
-                Action::FunctionCall {
-                    method_name: "register_agent".into(),
-                    args: serde_json::to_vec(&json!({ "attestation": attestation }))?,
-                    gas: REGISTER_GAS,
-                    deposit,
-                },
-            )
-            .await?;
+        let register = Action::FunctionCall {
+            method_name: "register_agent".into(),
+            args: serde_json::to_vec(&json!({ "attestation": attestation }))?,
+            gas: REGISTER_GAS,
+            deposit,
+        };
+        let tx_hash = self.relay(register).await?;
 
         let valid_until_ms = self
             .agent_view()
@@ -197,6 +204,29 @@ impl Registrar {
             tx_hash,
             valid_until_ms,
         })
+    }
+
+    /// Has the agent sign `action` for the contract as a delegate action, then sends it
+    /// from the sponsor, which pays its gas and deposit. Returns the relay's tx hash.
+    async fn relay(&self, action: Action) -> Result<String, AgentError> {
+        let account_id = self.account_id();
+        let access = self.access(&self.agent, &account_id).await?;
+        let signed = DelegateAction {
+            sender_id: account_id.clone(),
+            receiver_id: self.contract_id.clone(),
+            actions: vec![action],
+            nonce: access.nonce + 1,
+            max_block_height: access.block_height + DELEGATE_TTL_BLOCKS,
+            public_key: self.agent.public_key(),
+        }
+        .sign(&self.agent);
+        self.send(
+            &self.sponsor,
+            &self.sponsor_id,
+            &account_id,
+            Action::Delegate(Box::new(signed)),
+        )
+        .await
     }
 
     /// Registers now and again before each registration expires, retrying with
@@ -270,6 +300,8 @@ mod tests {
     use crate::collateral::tests::mock_pccs;
     use crate::config::tests::config;
     use base64::{engine::general_purpose::STANDARD, Engine};
+    use ring::signature::{UnparsedPublicKey, ED25519};
+    use sha2::{Digest, Sha256};
     use wiremock::matchers::{body_partial_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -325,7 +357,11 @@ mod tests {
             on_rpc(
                 &server,
                 json!({ "params": { "request_type": "view_access_key", "account_id": account } }),
-                rpc_result(json!({ "nonce": nonce, "block_hash": base58::encode(&[9u8; 32]) })),
+                rpc_result(json!({
+                    "nonce": nonce,
+                    "block_hash": base58::encode(&[9u8; 32]),
+                    "block_height": 1000
+                })),
             )
             .await;
         }
@@ -393,6 +429,34 @@ mod tests {
         haystack.windows(needle.len()).any(|w| w == needle)
     }
 
+    fn find(haystack: &[u8], needle: &[u8]) -> usize {
+        haystack
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .unwrap()
+    }
+
+    fn u32_at(bytes: &[u8], at: usize) -> usize {
+        u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize
+    }
+
+    /// The deposit attached to the `register_agent` call inside a relayed transaction.
+    fn register_deposit(signed: &[u8]) -> u128 {
+        let args_at = find(signed, b"register_agent") + "register_agent".len();
+        let deposit_at = args_at + 4 + u32_at(signed, args_at) + 8;
+        u128::from_le_bytes(signed[deposit_at..deposit_at + 16].try_into().unwrap())
+    }
+
+    /// The delegate action a sponsor transaction relays, and the agent's signature on it.
+    fn relayed_delegate(signed: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        let receiver_at = 4 + u32_at(signed, 0) + 33 + 8;
+        let tag_at = receiver_at + 4 + u32_at(signed, receiver_at) + 32 + 4;
+        assert_eq!(signed[tag_at], 8, "not a Delegate action");
+        let end = signed.len() - SIGNATURE_LEN;
+        let delegate = signed[tag_at + 1..end - SIGNATURE_LEN].to_vec();
+        (delegate, signed[end - 64..end].to_vec())
+    }
+
     #[tokio::test]
     async fn sponsor_creates_the_missing_agent_account() {
         let f = fixture(None, json!({ "valid_until_ms": "1700000000000" })).await;
@@ -400,7 +464,7 @@ mod tests {
         let sent = sent_transactions(&f.server).await;
         assert_eq!(sent.len(), 1);
         assert_eq!(signer(&sent[0]), "sponsor.testnet");
-        assert_eq!(deposit(&sent[0]), NEAR / 2);
+        assert_eq!(deposit(&sent[0]), NEAR * 3 / 1000);
         assert!(contains(&sent[0], f.agent_id.as_bytes()));
     }
 
@@ -412,17 +476,31 @@ mod tests {
         assert_eq!(registration.account_id, f.agent_id);
         assert_eq!(registration.valid_until_ms, 1_700_000_000_000);
 
-        // Well funded: only the register call, signed by the agent, no storage deposit
-        // because get_agent already knows it.
+        // Account exists: only the relayed register call. The sponsor signs and pays; no
+        // storage deposit because get_agent already knows the agent.
         let sent = sent_transactions(&f.server).await;
         assert_eq!(sent.len(), 1);
-        assert_eq!(signer(&sent[0]), f.agent_id);
-        assert_eq!(deposit(&sent[0]), 0);
-        assert!(contains(&sent[0], b"register_agent"));
+        assert_eq!(signer(&sent[0]), "sponsor.testnet");
+        assert_eq!(register_deposit(&sent[0]), 0);
         assert!(contains(&sent[0], b"\"attestation\""));
         assert_eq!(base58::decode(&registration.tx_hash).unwrap().len(), 32);
 
+        // The agent signed the delegate action: from its account, to the contract, with
+        // its next nonce, valid for 100 blocks, under the NEP-461 prefix.
         let agent = SigningKey::from_seed(&AGENT_SEED).unwrap();
+        let (delegate, signature) = relayed_delegate(&sent[0]);
+        let sender = [&64u32.to_le_bytes()[..], f.agent_id.as_bytes()].concat();
+        assert!(delegate.starts_with(&sender));
+        assert!(contains(&delegate, b"sigstack-agent.testnet"));
+        let nonce_and_expiry = [21u64.to_le_bytes(), 1100u64.to_le_bytes()].concat();
+        assert!(contains(&delegate, &nonce_and_expiry));
+        let mut message = ((1u32 << 30) + 366).to_le_bytes().to_vec();
+        message.extend_from_slice(&delegate);
+        let hash = Sha256::digest(&message);
+        UnparsedPublicKey::new(&ED25519, agent.public_key())
+            .verify(&hash, &signature)
+            .unwrap();
+
         assert_eq!(*f.tee.quoted.lock().unwrap(), vec![agent.report_data()]);
     }
 
@@ -435,16 +513,16 @@ mod tests {
 
         let sent = sent_transactions(&f.server).await;
         assert_eq!(sent.len(), 1);
-        assert_eq!(deposit(&sent[0]), REGISTER_DEPOSIT);
+        assert_eq!(register_deposit(&sent[0]), REGISTER_DEPOSIT);
     }
 
     #[tokio::test]
     async fn low_balance_is_topped_up_to_target() {
-        let f = fixture(Some(NEAR / 100), json!({ "valid_until_ms": "1" })).await;
+        let f = fixture(Some(NEAR / 1000), json!({ "valid_until_ms": "1" })).await;
         f.registrar.ensure_funded().await.unwrap();
         let sent = sent_transactions(&f.server).await;
         assert_eq!(sent.len(), 1);
-        assert_eq!(deposit(&sent[0]), NEAR / 2 - NEAR / 100);
+        assert_eq!(deposit(&sent[0]), NEAR * 3 / 1000 - NEAR / 1000);
     }
 
     #[tokio::test]
