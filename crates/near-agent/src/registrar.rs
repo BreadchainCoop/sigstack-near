@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// What shade-agent-js attaches; attestation verification is gas-heavy.
 pub const REGISTER_GAS: u64 = 300_000_000_000_000;
@@ -24,6 +24,12 @@ pub const REGISTER_GAS: u64 = 300_000_000_000_000;
 pub const REGISTER_DEPOSIT: u128 = 5_000_000_000_000_000_000_000;
 /// How many blocks (about a second each) a signed delegate action stays valid.
 const DELEGATE_TTL_BLOCKS: u64 = 100;
+/// Warn below this sponsor balance (1 NEAR). Each registration holds about 0.31 NEAR of
+/// prepaid gas while in flight, so agents stop registering not long after.
+const SPONSOR_LOW_BALANCE: u128 = 1_000_000_000_000_000_000_000_000;
+/// Smallest excess (0.001 NEAR) worth returning to the sponsor; below it the relay's gas
+/// isn't worth spending.
+const MIN_RETURN: u128 = 1_000_000_000_000_000_000_000;
 
 /// Re-register at most this long before the registration expires.
 const MAX_REFRESH_MARGIN: Duration = Duration::from_secs(24 * 60 * 60);
@@ -127,10 +133,17 @@ impl Registrar {
     /// Creates the agent's implicit account with a transfer from the sponsor, or tops it
     /// up if it has dropped below `min_balance`. The agent pays for nothing itself, so
     /// this only has to cover the account's storage.
+    ///
+    /// A failed relayed call refunds its deposit to the agent, not the sponsor, so anything
+    /// above `top_up_balance` is sent back first. That's best effort: a failure is logged.
     pub async fn ensure_funded(&self) -> Result<(), AgentError> {
         let account_id = self.account_id();
         let balance = self.rpc.balance(&account_id).await?.unwrap_or(0);
         if balance >= self.min_balance {
+            let excess = balance.saturating_sub(self.top_up_balance);
+            if excess >= MIN_RETURN {
+                self.return_excess(excess).await;
+            }
             return Ok(());
         }
         let amount = self.top_up_balance - balance;
@@ -149,6 +162,34 @@ impl Registrar {
         Ok(())
     }
 
+    /// Sends `amount` from the agent back to the sponsor, relayed so the sponsor pays gas.
+    async fn return_excess(&self, amount: u128) {
+        let sponsor_id = self.sponsor_id.clone();
+        match self
+            .relay(&sponsor_id, Action::Transfer { deposit: amount })
+            .await
+        {
+            Ok(tx_hash) => info!(
+                "Returned {amount} yoctoNEAR of refunded deposit to {sponsor_id} (tx {tx_hash})"
+            ),
+            Err(e) => warn!("Could not return {amount} yoctoNEAR to {sponsor_id}: {e}"),
+        }
+    }
+
+    /// Logs a warning when the sponsor is running low, so it's topped up before agents stop
+    /// registering. Best effort.
+    async fn check_sponsor_balance(&self) {
+        match self.rpc.balance(&self.sponsor_id).await {
+            Ok(balance) if balance.unwrap_or(0) < SPONSOR_LOW_BALANCE => warn!(
+                "Sponsor {} is low: {} yoctoNEAR; each registration holds ~0.31 NEAR",
+                self.sponsor_id,
+                balance.unwrap_or(0)
+            ),
+            Ok(_) => {}
+            Err(e) => debug!("Could not read the sponsor's balance: {e}"),
+        }
+    }
+
     async fn agent_view(&self) -> Result<Option<Value>, AgentError> {
         let view = self
             .rpc
@@ -165,6 +206,7 @@ impl Registrar {
     pub async fn register(&self) -> Result<Registration, AgentError> {
         let account_id = self.account_id();
         self.ensure_funded().await?;
+        self.check_sponsor_balance().await;
 
         // Storage is only charged the first time.
         let deposit = match self.agent_view().await? {
@@ -187,7 +229,7 @@ impl Registrar {
             gas: REGISTER_GAS,
             deposit,
         };
-        let tx_hash = self.relay(register).await?;
+        let tx_hash = self.relay(&self.contract_id, register).await?;
 
         let valid_until_ms = self
             .agent_view()
@@ -206,14 +248,14 @@ impl Registrar {
         })
     }
 
-    /// Has the agent sign `action` for the contract as a delegate action, then sends it
+    /// Has the agent sign `action` for `receiver_id` as a delegate action, then sends it
     /// from the sponsor, which pays its gas and deposit. Returns the relay's tx hash.
-    async fn relay(&self, action: Action) -> Result<String, AgentError> {
+    async fn relay(&self, receiver_id: &str, action: Action) -> Result<String, AgentError> {
         let account_id = self.account_id();
         let access = self.access(&self.agent, &account_id).await?;
         let signed = DelegateAction {
             sender_id: account_id.clone(),
-            receiver_id: self.contract_id.clone(),
+            receiver_id: receiver_id.to_string(),
             actions: vec![action],
             nonce: access.nonce + 1,
             max_block_height: access.block_height + DELEGATE_TTL_BLOCKS,
@@ -470,7 +512,11 @@ mod tests {
 
     #[tokio::test]
     async fn registers_with_the_agent_key_and_report_data() {
-        let f = fixture(Some(NEAR), json!({ "valid_until_ms": "1700000000000" })).await;
+        let f = fixture(
+            Some(NEAR * 3 / 1000),
+            json!({ "valid_until_ms": "1700000000000" }),
+        )
+        .await;
         let registration = f.registrar.register().await.unwrap();
 
         assert_eq!(registration.account_id, f.agent_id);
@@ -507,7 +553,7 @@ mod tests {
     #[tokio::test]
     async fn new_agents_attach_the_storage_deposit() {
         // get_agent returns null: not registered yet, and still null afterwards.
-        let f = fixture(Some(NEAR), Value::Null).await;
+        let f = fixture(Some(NEAR * 3 / 1000), Value::Null).await;
         let err = f.registrar.register().await.unwrap_err();
         assert!(err.to_string().contains("valid_until_ms"), "{err}");
 
@@ -523,6 +569,64 @@ mod tests {
         let sent = sent_transactions(&f.server).await;
         assert_eq!(sent.len(), 1);
         assert_eq!(deposit(&sent[0]), NEAR * 3 / 1000 - NEAR / 1000);
+    }
+
+    // A failed relayed call refunded its deposit to the agent: the excess goes back to the
+    // sponsor, signed by the agent and relayed by the sponsor.
+    #[tokio::test]
+    async fn refunded_excess_returns_to_the_sponsor() {
+        let f = fixture(Some(NEAR * 8 / 1000), Value::Null).await;
+        f.registrar.ensure_funded().await.unwrap();
+
+        let sent = sent_transactions(&f.server).await;
+        assert_eq!(sent.len(), 1);
+        assert_eq!(signer(&sent[0]), "sponsor.testnet");
+        let (delegate, _) = relayed_delegate(&sent[0]);
+        assert!(contains(&delegate, f.agent_id.as_bytes()));
+        assert!(contains(&delegate, b"sponsor.testnet"));
+        let transfer = [&[3u8][..], &(NEAR * 5 / 1000).to_le_bytes()[..]].concat();
+        assert!(contains(&delegate, &transfer));
+    }
+
+    // A low sponsor only warns; registration goes ahead while it can still pay.
+    #[tokio::test]
+    async fn low_sponsor_still_registers() {
+        let f = fixture(
+            Some(NEAR * 3 / 1000),
+            json!({ "valid_until_ms": "1700000000000" }),
+        )
+        .await;
+        on_rpc(
+            &f.server,
+            json!({ "params": { "request_type": "view_account", "account_id": "sponsor.testnet" } }),
+            rpc_result(json!({ "amount": (NEAR / 2).to_string() })),
+        )
+        .await;
+        f.registrar.register().await.unwrap();
+        assert_eq!(sent_transactions(&f.server).await.len(), 1);
+    }
+
+    // Dust above the target isn't worth the relay's gas.
+    #[tokio::test]
+    async fn small_excess_stays() {
+        let f = fixture(Some(NEAR * 3 / 1000 + NEAR / 10_000), Value::Null).await;
+        f.registrar.ensure_funded().await.unwrap();
+        assert!(sent_transactions(&f.server).await.is_empty());
+    }
+
+    // Returning the excess is best effort; a failure doesn't stop registration.
+    #[tokio::test]
+    async fn failed_return_is_not_fatal() {
+        let f = fixture(Some(NEAR), Value::Null).await;
+        f.server.reset().await;
+        on_rpc(
+            &f.server,
+            json!({ "params": { "request_type": "view_account" } }),
+            rpc_result(json!({ "amount": NEAR.to_string() })),
+        )
+        .await;
+        f.registrar.ensure_funded().await.unwrap();
+        assert!(sent_transactions(&f.server).await.is_empty());
     }
 
     #[tokio::test]

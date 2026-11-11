@@ -17,7 +17,9 @@ services:
   signal-api:
     image: bbernhard/signal-cli-rest-api@sha256:2399d449123cdad56c4d859277e3b9127e1a00c4d2ab4601c239882609286cf8
     environment:
-      - MODE=normal
+      # Precompiled signal-cli: no JVM start per request. In normal mode each receive took
+      # ~8 s and each send or typing call 15-22 s on the CVM.
+      - MODE=native
       - LOG_LEVEL=info
     volumes:
       - signal-config-translation:/home/.local/share/signal-cli

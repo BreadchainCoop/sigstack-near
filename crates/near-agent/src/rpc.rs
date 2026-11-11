@@ -156,7 +156,9 @@ impl NearRpc {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
-    /// Sends a transaction and waits for it to be final. Errors if it failed.
+    /// Sends a transaction and waits for it to be final. Errors if it or any of its
+    /// receipts failed: a relayed (NEP-366) call that fails only shows in its receipt, while
+    /// the transaction's own status still reads success.
     pub async fn send_tx(&self, signed: &SignedTransaction) -> Result<(), AgentError> {
         let outcome = self
             .call(
@@ -169,11 +171,22 @@ impl NearRpc {
             .await?
             .map_err(|error| AgentError::Rpc(error.to_string()))?;
         match outcome.get("status") {
-            Some(status) if status.get("SuccessValue").is_some() => Ok(()),
-            Some(status) => Err(AgentError::TxFailed(
-                status.get("Failure").unwrap_or(status).to_string(),
-            )),
-            None => Err(AgentError::Rpc("transaction outcome has no status".into())),
+            Some(status) if status.get("SuccessValue").is_some() => {}
+            Some(status) => {
+                return Err(AgentError::TxFailed(
+                    status.get("Failure").unwrap_or(status).to_string(),
+                ));
+            }
+            None => return Err(AgentError::Rpc("transaction outcome has no status".into())),
+        }
+        let receipts = outcome.get("receipts_outcome").and_then(Value::as_array);
+        let failure = receipts
+            .into_iter()
+            .flatten()
+            .find_map(|receipt| receipt.pointer("/outcome/status/Failure"));
+        match failure {
+            Some(failure) => Err(AgentError::TxFailed(failure.to_string())),
+            None => Ok(()),
         }
     }
 }
@@ -408,6 +421,21 @@ mod tests {
         )
         .await;
         respond(&server, tx(3), result(json!({}))).await;
+        // A relayed call: the transaction succeeds, the inner receipt fails.
+        respond(
+            &server,
+            tx(6),
+            result(json!({
+                "status": { "SuccessValue": "" },
+                "receipts_outcome": [
+                    { "outcome": { "status": { "SuccessValue": "" } } },
+                    { "outcome": { "status": { "Failure": { "ActionError": {
+                        "kind": { "FunctionCallError": { "ExecutionError": "wrong expected_measurements hash" } }
+                    }}}}}
+                ]
+            })),
+        )
+        .await;
         respond(
             &server,
             tx(4),
@@ -427,6 +455,10 @@ mod tests {
         let err = rpc.send_tx(&signed(2)).await.unwrap_err();
         assert!(matches!(err, AgentError::TxFailed(_)));
         assert!(err.to_string().contains("Attestation verification failed"));
+
+        let err = rpc.send_tx(&signed(6)).await.unwrap_err();
+        assert!(matches!(err, AgentError::TxFailed(_)));
+        assert!(err.to_string().contains("wrong expected_measurements hash"));
 
         for byte in [3, 4, 5] {
             let err = rpc.send_tx(&signed(byte)).await.unwrap_err();
