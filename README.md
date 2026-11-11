@@ -48,7 +48,9 @@ from env.
 dstack hashes `app_compose`, a JSON document that wraps the compose file together with
 the CVM settings and Phala's pre-launch script. The demo's is committed byte-for-byte as
 [`docker/phala-demo.app-compose.json`](docker/phala-demo.app-compose.json), copied from
-the CVM's attestation and refreshed after every demo upgrade. To check what the demo bot runs:
+the CVM's attestation and refreshed after every demo upgrade. Every build ever approved is also
+archived under [`verifier/builds/`](verifier/builds), indexed by
+[`verifier/builds.json`](verifier/builds.json). To check what the demo bot runs:
 
 1. `sha256sum docker/phala-demo.app-compose.json` gives the compose hash. It should equal
    the `app_compose_hash_payload` the agent contract approved and verified when the bot
@@ -111,7 +113,14 @@ They run against mock dstack, PCCS and RPC servers.
 
 #### 2. Check the live contract on NEAR testnet (read-only)
 
-The agent contract is [`agent.sigstack.testnet`](https://testnet.nearblocks.io/address/agent.sigstack.testnet),
+The quickest way is the **[verifier page](https://breadchaincoop.github.io/sigstack-near/)**. It reads
+the contract live and shows the registered bot and every approved build. For each build it hashes
+the published `app_compose` in your browser, and lists the image digests that build pins. It also
+checks the contract's on-chain code against the CI-built wasm, and says what is and isn't verified.
+It's one static file, [`verifier/index.html`](verifier/index.html), and needs no tooling. Opened
+locally, it fetches the build files from `main`.
+
+To check the same things from a terminal: the agent contract is [`agent.sigstack.testnet`](https://testnet.nearblocks.io/address/agent.sigstack.testnet),
 owned by `sigstack.testnet`. With [near-cli-rs](https://github.com/near/near-cli-rs):
 
 ```bash

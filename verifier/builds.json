@@ -1,0 +1,18 @@
+[
+  {
+    "compose_hash": "a949c1ffaf5aede815321e6a3fc7bb4190637522f38bb841ff13fe50051b507d",
+    "app_compose": "builds/a949c1ffaf5aede815321e6a3fc7bb4190637522f38bb841ff13fe50051b507d.json",
+    "images_commit": "bba9335dd65836e678bf9df1bb52a10d338a5ad3",
+    "images_run": 43081163816,
+    "pinned_in_pr": 27,
+    "summary": "Current demo build. Funds each agent account enough for prepaid gas, and registers only after the Signal check passes."
+  },
+  {
+    "compose_hash": "3b1c070a5c9ddafc7e3a0de188454d7ec298305bce66769128fece44b66d7905",
+    "app_compose": "builds/3b1c070a5c9ddafc7e3a0de188454d7ec298305bce66769128fece44b66d7905.json",
+    "images_commit": "d9a75fcc73d154c5e4e1236d1176a95507c9e61f",
+    "images_run": 43063521971,
+    "pinned_in_pr": 22,
+    "summary": "First demo build. Registered, but funded agents too little for prepaid gas; replaced by a949c1ff."
+  }
+]

@@ -1,2 +1,3 @@
 # Byte-exact copy of the attested app_compose; its sha256 is the compose hash.
 docker/phala-demo.app-compose.json -text
+verifier/builds/*.json -text
