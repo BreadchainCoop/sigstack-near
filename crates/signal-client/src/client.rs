@@ -501,6 +501,30 @@ impl SignalClient {
         Ok(())
     }
 
+    /// Shows (`true`) or clears (`false`) the bot's typing indicator in the chat that
+    /// `original` came from.
+    pub async fn set_typing(&self, original: &BotMessage, typing: bool) -> Result<(), SignalError> {
+        let recipient = self.resolve_send_recipient(original).await?;
+        let url = format!(
+            "{}/v1/typing-indicator/{}",
+            self.base_url,
+            encode(&original.receiving_account)
+        );
+        let request = if typing {
+            self.client.put(url)
+        } else {
+            self.client.delete(url)
+        };
+        let response = request
+            .json(&serde_json::json!({ "recipient": recipient }))
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(SignalError::SendFailed(response.text().await.unwrap_or_default()));
+        }
+        Ok(())
+    }
+
     /// Reply to a message (handles both direct and group messages).
     /// Uses the receiving account to send the reply.
     pub async fn reply(&self, original: &BotMessage, message: &str) -> Result<(), SignalError> {

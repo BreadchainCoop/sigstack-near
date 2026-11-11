@@ -303,6 +303,51 @@ mod tests {
             .unwrap();
     }
 
+    // Typing on is a PUT, off a DELETE, both naming the chat to show it in.
+    #[tokio::test]
+    async fn typing_indicator_puts_then_deletes() {
+        let mock_server = MockServer::start().await;
+        for verb in ["PUT", "DELETE"] {
+            Mock::given(method(verb))
+                .and(path("/v1/typing-indicator/%2B15555555555"))
+                .respond_with(ResponseTemplate::new(204))
+                .expect(1)
+                .mount(&mock_server)
+                .await;
+        }
+
+        let client = create_test_client(&mock_server).await;
+        let mut original = BotMessage {
+            source: "+14155551234".into(),
+            source_number: None,
+            source_name: None,
+            text: "!verify".into(),
+            timestamp: 2,
+            message_timestamp: 1,
+            is_group: true,
+            group_id: Some("group.abc".into()),
+            group_name: None,
+            receiving_account: "+15555555555".into(),
+            attachments: vec![],
+            quote: None,
+        };
+        client.set_typing(&original, true).await.unwrap();
+        client.set_typing(&original, false).await.unwrap();
+
+        let bodies: Vec<serde_json::Value> = mock_server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect();
+        assert_eq!(bodies[0]["recipient"], "group.abc");
+
+        // A failed call is an error, so dispatch can log it and carry on.
+        original.receiving_account = "+10000000000".into();
+        assert!(client.set_typing(&original, true).await.is_err());
+    }
+
     // Styled sends set text_mode; plain sends leave it out, as before styled mode existed.
     #[tokio::test]
     async fn styled_replies_set_text_mode() {
