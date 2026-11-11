@@ -97,7 +97,11 @@ pub fn check_bindings(
     }
 
     let compose_hash = hex::encode(Sha256::digest(attestation.app_compose()?.as_bytes()));
-    if !attestation.info.compose_hash.eq_ignore_ascii_case(&compose_hash) {
+    if !attestation
+        .info
+        .compose_hash
+        .eq_ignore_ascii_case(&compose_hash)
+    {
         return Err(VerifyError::Binding(
             "compose_hash isn't the hash of app_compose".into(),
         ));

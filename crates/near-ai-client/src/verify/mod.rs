@@ -318,9 +318,8 @@ impl ModelVerifier {
             let status = response.status();
             if status.is_success() {
                 let body: serde_json::Value = response.json().await?;
-                return serde_json::from_value(body.clone()).map_err(|_| {
-                    VerifyError::Fetch(format!("signature unavailable: {body}"))
-                });
+                return serde_json::from_value(body.clone())
+                    .map_err(|_| VerifyError::Fetch(format!("signature unavailable: {body}")));
             }
             last = format!("signature: HTTP {status}");
             if status != reqwest::StatusCode::NOT_FOUND {
@@ -459,8 +458,9 @@ pub(crate) mod tests {
     /// (NRAS is mocked, so its contents don't matter beyond the nonce).
     fn report_json() -> Value {
         let mut attestation = fixture()["attestation"].clone();
-        attestation["nvidia_payload"] =
-            json!({"nonce": fixture()["nonce"], "evidence_list": []}).to_string().into();
+        attestation["nvidia_payload"] = json!({"nonce": fixture()["nonce"], "evidence_list": []})
+            .to_string()
+            .into();
         json!({"gateway_attestation": {}, "model_attestations": [attestation]})
     }
 
@@ -496,7 +496,10 @@ pub(crate) mod tests {
 
         async fn signature(&self, body: Value) {
             Mock::given(method("GET"))
-                .and(path(format!("/v1/signature/{}", fixture_exchange().chat_id)))
+                .and(path(format!(
+                    "/v1/signature/{}",
+                    fixture_exchange().chat_id
+                )))
                 .and(query_param("signing_algo", "ed25519"))
                 .and(header("Authorization", "Bearer key"))
                 .respond_with(ResponseTemplate::new(200).set_body_json(body))
@@ -638,7 +641,10 @@ pub(crate) mod tests {
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("wasn't in 4 fresh attestation reports"), "{err}");
+        assert!(
+            err.contains("wasn't in 4 fresh attestation reports"),
+            "{err}"
+        );
     }
 
     #[tokio::test]
@@ -784,7 +790,10 @@ pub(crate) mod tests {
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        panic!("background verification didn't finish: {:?}", verifier.status());
+        panic!(
+            "background verification didn't finish: {:?}",
+            verifier.status()
+        );
     }
 
     #[test]

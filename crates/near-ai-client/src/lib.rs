@@ -383,7 +383,10 @@ mod tests {
             .mount(&mock_server)
             .await;
         let client = create_test_client(&mock_server).await;
-        client.chat(vec![Message::user("hi")], None, None).await.unwrap();
+        client
+            .chat(vec![Message::user("hi")], None, None)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

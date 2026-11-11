@@ -39,7 +39,10 @@ pub async fn verify_gpus(
         .send()
         .await?;
     if !response.status().is_success() {
-        return Err(VerifyError::Gpu(format!("NRAS: HTTP {}", response.status())));
+        return Err(VerifyError::Gpu(format!(
+            "NRAS: HTTP {}",
+            response.status()
+        )));
     }
     check_verdict(&response.json().await?)
 }
@@ -124,7 +127,10 @@ pub(crate) mod tests {
             (json!([]), "no overall token"),
             (verdict(false, good_gpu()), "rejected"),
             (
-                json!([["JWT", token(json!({"x-nvidia-overall-att-result": true}))], {}]),
+                json!([
+                    ["JWT", token(json!({"x-nvidia-overall-att-result": true}))],
+                    {}
+                ]),
                 "no GPU tokens",
             ),
             (

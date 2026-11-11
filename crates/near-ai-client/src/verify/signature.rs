@@ -21,7 +21,10 @@ pub struct ResponseSignature {
 
 /// Checks that the model's TEE signed exactly this request and response:
 /// `text` is `{model}:{sha256(request)}:{sha256(response)}`, signed with ed25519.
-pub fn check_signature(sig: &ResponseSignature, exchange: &ChatExchange) -> Result<(), VerifyError> {
+pub fn check_signature(
+    sig: &ResponseSignature,
+    exchange: &ChatExchange,
+) -> Result<(), VerifyError> {
     let kind = sig.signature_kind.as_deref().unwrap_or("unknown");
     if kind != "provider_tee" {
         return Err(VerifyError::Signature(format!(
