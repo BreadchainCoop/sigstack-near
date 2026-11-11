@@ -90,10 +90,11 @@ What the contract tests cover (details in [`contracts/agent/README.md`](contract
 - **Expiry and pruning:** an expired or revoked agent can be pruned by anyone and must re-register.
 - **TEE mode:** named accounts are rejected, because the quote binds the agent's implicit
   account. The mock attestation accepted in local mode fails real quote verification.
+- **A real quote:** the demo bot's actual `register_agent` arguments (its Phala TDX quote, PCCS
+  collateral and `tcb_info`) replay at the block time they executed. They register the agent
+  when its build and PPID are approved. They're rejected from any other account, for an
+  unapproved build or PPID, and once the collateral is out of date.
 - **Upgrades:** `update_contract` keeps the owner, settings and approvals.
-
-A unit test can't produce a real TDX quote, so verifying a genuine quote is exercised by the
-live demo below.
 
 The `near-agent` tests cover:
 

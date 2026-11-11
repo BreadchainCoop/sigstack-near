@@ -84,8 +84,17 @@ the integration tests against it. It needs rustup and Docker, and it's what CI r
 ```
 
 Most tests use `requires_tee = false`, because a valid TDX quote can't be produced outside a TEE.
-The `requires_tee = true` unit tests cover what can be checked without one: named accounts are
-rejected, the mock attestation fails quote verification, and local-mode whitelisting is refused.
+The `requires_tee = true` unit tests cover the rest in two ways:
+
+- **Without a quote:** named accounts are rejected, the mock attestation fails quote verification,
+  and local-mode whitelisting is refused.
+- **With a real quote:** [`tests/fixtures/demo_register_agent.json`](tests/fixtures/demo_register_agent.json)
+  is the demo bot's actual `register_agent` arguments from transaction
+  [`4zqtSnqZ…KRRW`](https://testnet.nearblocks.io/txns/4zqtSnqZu3t8UDoJonqtzrrhdPk96KeFC8BJCWe3KRRW):
+  a TDX quote from Phala Cloud, the PCCS collateral and dstack's `tcb_info`. Replayed at the block
+  time that transaction executed, it registers the agent when the demo's build and PPID are
+  approved. It's rejected from any other account (report data mismatch), for an unapproved build
+  or PPID, and 90 days later when the collateral is out of date.
 
 ### Unit tests
 
