@@ -45,13 +45,17 @@ values are not measured, so the demo compose names every image by digest and wri
 every setting into the file. Only real secrets (Signal phone, NEAR AI API key) come
 from env.
 
-To check a running bot yourself:
+dstack hashes `app_compose`, a JSON document that wraps the compose file together with
+the CVM settings and Phala's pre-launch script. The demo's is committed byte-for-byte as
+[`docker/phala-demo.app-compose.json`](docker/phala-demo.app-compose.json), copied from
+the CVM's attestation and refreshed after every demo upgrade. To check what the demo bot runs:
 
-1. Get its attestation (`!verify` in Signal, or the verifier page). It includes
-   `app_compose`, the exact compose the CVM booted.
-2. sha256 of `app_compose` should equal the attested compose hash, and that hash
-   should be one the agent contract approves.
-3. Inside `app_compose`, read the image digests. Each is tagged `sha-<commit>` in
+1. `sha256sum docker/phala-demo.app-compose.json` gives the compose hash. It should equal
+   the `app_compose_hash_payload` the agent contract approved and verified when the bot
+   registered, and the compose hash `!verify` reports (see [Try it](#try-it)).
+2. `jq -j .docker_compose_file docker/phala-demo.app-compose.json | diff - docker/phala-demo.yaml`
+   prints nothing: the attested compose is this repo's file.
+3. In that file, read the image digests. Each is tagged `sha-<commit>` in
    `ghcr.io/breadchaincoop/sigstack-near-*`, built by the [`images`](.github/workflows/images.yml)
    workflow from that commit of this repo.
 
@@ -126,13 +130,51 @@ The deployed code is traceable to this repo:
   of the same sha256. Check it with
   `near account view-account-summary agent.sigstack.testnet network-config testnet now`.
 
-_To be filled in once the demo bot is registered: its agent account, and how to match its
-attested compose hash to [`docker/phala-demo.yaml`](docker/phala-demo.yaml) at the submission tag
-(see [What the attestation pins](#what-the-attestation-pins))._
+The demo bot is registered. At the time of writing, its agent account is
+[`b0c2f7e3…6476`](https://testnet.nearblocks.io/address/b0c2f7e3b2e49476e99d8219703fa414bfb65d3b0077cf3a048662029ef46476),
+registered in
+[`4zqtSnqZ…KRRW`](https://testnet.nearblocks.io/txns/4zqtSnqZu3t8UDoJonqtzrrhdPk96KeFC8BJCWe3KRRW).
+The bot makes a new key on every boot, so after a restart the current one is the newest entry in
+`get_agents`. Registration lasts 7 days, and the bot re-registers before it expires.
+
+To tie the registered bot to this repo:
+
+1. In `get_agents`, its `measurements.app_compose_hash_payload` is the compose hash the contract
+   checked against the TDX quote. For the demo it is
+   `a949c1ffaf5aede815321e6a3fc7bb4190637522f38bb841ff13fe50051b507d`.
+2. That hash is the sha256 of
+   [`docker/phala-demo.app-compose.json`](docker/phala-demo.app-compose.json), which wraps
+   [`docker/phala-demo.yaml`](docker/phala-demo.yaml) unchanged. See
+   [What the attestation pins](#what-the-attestation-pins) for the commands.
 
 #### 3. Talk to the demo bot in Signal
 
-_To be filled in: the demo bot's Signal link, and a `!verify <random text>` walkthrough._
+Open [signal.me/#eu/SbV9bgtt…](https://signal.me/#eu/SbV9bgttO6r-3Zpak8AUB3WdIeIjgLsjAShkM6lcgQPihTCX4xJIpJnTmXFW4IwW)
+on a device with Signal, or search for the username `sigstackdemo.98`. The demo doesn't need a
+subscription; every command is open.
+
+To check you're talking to the attested bot, send `!verify <random text>`, e.g. `!verify k3v9-pear`.
+The reply has:
+
+- **Your Challenge:** `Sigstack: k3v9-pear`. The bot prefixes your text, then puts it in the
+  quote's report data.
+- **Report Data (hex):** the challenge in hex. Check it with
+  `printf 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
+- **Compose Hash:** should be `a949c1ff…507d`, the same as above.
+- **TDX Quote:** paste it into [proof.t16z.com](https://proof.t16z.com). It checks the Intel
+  signature. Its report data should be your hex, zero-padded to 64 bytes. A fresh challenge in
+  a genuine quote proves the reply came from inside the TEE just now.
+
+Ignore step 3 of the reply's own "How to Verify". It's inherited from the upstream bot and
+names the upstream repo and file. The checks above replace it.
+
+Then try the product:
+
+- **Voice, in a DM or a group:** `!transcribe-on`, then send a voice note. It's transcribed by
+  NEAR AI Whisper.
+- **Translation, in a group with the bot:** `!translate-me-on en es`, then write in either
+  language. Your messages are translated into the other one.
+- `!help` lists everything. See [Commands](#commands).
 
 #### 4. Run your own bot (optional)
 
