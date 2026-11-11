@@ -46,8 +46,16 @@ async fn main() -> AppResult<()> {
         warn!("Not running in TEE environment - attestation unavailable");
     }
 
+    if !signal.health_check().await {
+        error!("Signal API not reachable at {}", config.signal.service_url);
+        return Err(anyhow::anyhow!("Signal API not reachable").into());
+    }
+    info!("Signal API healthy");
+
     // Each boot registers a fresh random agent key with the agent contract and keeps
-    // it registered. Failures are logged and retried; they never stop the bot.
+    // it registered. Failures are logged and retried; they never stop the bot. This
+    // runs after the Signal check, so a restart loop while signal-api starts doesn't
+    // generate and fund a new agent account on every attempt.
     if config.agent.enabled() {
         if !in_tee {
             warn!("AGENT__CONTRACT_ID set without a TEE - skipping agent registration");
@@ -65,12 +73,6 @@ async fn main() -> AppResult<()> {
             }
         }
     }
-
-    if !signal.health_check().await {
-        error!("Signal API not reachable at {}", config.signal.service_url);
-        return Err(anyhow::anyhow!("Signal API not reachable").into());
-    }
-    info!("Signal API healthy");
 
     let nickname = config
         .bot

@@ -24,11 +24,14 @@ pub struct AgentConfig {
     #[serde(default)]
     pub sponsor_private_key: String,
 
-    /// Top up the agent account when its balance drops below this (NEAR).
+    /// Top up the agent account when its balance drops below this (NEAR). A
+    /// transaction must cover its full prepaid gas up front: `register_agent`'s 300 Tgas
+    /// is about 0.31 NEAR on testnet (unused gas is refunded), plus the 0.005 deposit.
     #[serde(default = "default_min_balance")]
     pub min_balance: String,
 
-    /// ...to this balance (NEAR). Covers storage, the registration deposit and gas.
+    /// ...to this balance (NEAR). Covers the account's storage, the registration
+    /// deposit, the prepaid gas, and a few weekly re-registrations (~0.02 NEAR burnt each).
     #[serde(default = "default_top_up_balance")]
     pub top_up_balance: String,
 
@@ -140,11 +143,11 @@ fn default_rpc_url() -> String {
 }
 
 fn default_min_balance() -> String {
-    "0.05".into()
+    "0.35".into()
 }
 
 fn default_top_up_balance() -> String {
-    "0.1".into()
+    "0.5".into()
 }
 
 fn default_pccs_urls() -> String {
@@ -202,7 +205,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             cfg.balances().unwrap(),
-            (YOCTO_PER_NEAR / 20, YOCTO_PER_NEAR / 10)
+            (YOCTO_PER_NEAR * 7 / 20, YOCTO_PER_NEAR / 2)
         );
         assert!(config().enabled());
     }
