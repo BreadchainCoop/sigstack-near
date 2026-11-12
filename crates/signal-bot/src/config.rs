@@ -75,6 +75,12 @@ pub struct NearAiConfig {
     /// Request timeout
     #[serde(default = "default_timeout", with = "humantime_serde")]
     pub timeout: Duration,
+
+    /// Verify each chat response's signature and the attestation of the model
+    /// instance that signed it (`NEAR_AI__VERIFY_RESPONSES`). Sends
+    /// `x-no-aliasing`, so `model` must be a canonical model name.
+    #[serde(default)]
+    pub verify_responses: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -412,6 +418,7 @@ mod tests {
             base_url: default_near_ai_url(),
             model: default_model(),
             timeout: default_timeout(),
+            verify_responses: false,
         });
         config
     }

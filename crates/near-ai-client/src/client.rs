@@ -5,6 +5,7 @@ use crate::types::*;
 use futures::StreamExt;
 use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio_stream::Stream;
@@ -14,6 +15,23 @@ use tracing::{debug, instrument, warn};
 const DEFAULT_MAX_RETRIES: u32 = 3;
 const DEFAULT_INITIAL_BACKOFF_MS: u64 = 100;
 const DEFAULT_MAX_BACKOFF_MS: u64 = 5000;
+
+/// A completed chat completion, byte-for-byte as sent and received: what NEAR AI's
+/// response signature covers.
+#[derive(Debug, Clone)]
+pub struct ChatExchange {
+    /// The completion's `id`, which keys its signature.
+    pub chat_id: String,
+    /// The model named in the request.
+    pub model: String,
+    pub request: Vec<u8>,
+    pub response: Vec<u8>,
+}
+
+/// Told about every successful chat completion, after the caller has its reply.
+pub trait ChatObserver: Send + Sync {
+    fn observe(&self, exchange: ChatExchange);
+}
 
 /// NEAR AI Cloud client.
 ///
@@ -25,6 +43,8 @@ pub struct NearAiClient {
     base_url: String,
     api_key: SecretString,
     model: String,
+    no_aliasing: bool,
+    observer: Option<Arc<dyn ChatObserver>>,
 }
 
 impl NearAiClient {
@@ -42,7 +62,23 @@ impl NearAiClient {
             base_url: base_url.into(),
             api_key: SecretString::new(api_key.into()),
             model: model.into(),
+            no_aliasing: false,
+            observer: None,
         })
+    }
+
+    /// Send `x-no-aliasing: true`, so NEAR AI serves exactly the configured model
+    /// (which must then be a canonical name, not an alias) and the model's own TEE
+    /// signs the response. Without it, only the gateway signs.
+    pub fn with_no_aliasing(mut self, no_aliasing: bool) -> Self {
+        self.no_aliasing = no_aliasing;
+        self
+    }
+
+    /// Report each successful chat completion to `observer`.
+    pub fn with_observer(mut self, observer: Arc<dyn ChatObserver>) -> Self {
+        self.observer = Some(observer);
+        self
     }
 
     /// Get the configured model name.
@@ -68,19 +104,34 @@ impl NearAiClient {
             tool_choice: None,
         };
 
-        let response = self
+        // Serialize once and send these exact bytes: the response signature covers them.
+        let body = serde_json::to_vec(&request)?;
+        let mut post = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
             .header(
                 "Authorization",
                 format!("Bearer {}", self.api_key.expose_secret()),
             )
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await?;
+            .header("Content-Type", "application/json");
+        if self.no_aliasing {
+            post = post.header("x-no-aliasing", "true");
+        }
+        let response = post.body(body.clone()).send().await?;
+        if !response.status().is_success() {
+            return Err(self.extract_error(response).await);
+        }
+        let bytes = response.bytes().await?.to_vec();
+        let chat_response: ChatResponse = serde_json::from_slice(&bytes)?;
 
-        let chat_response = self.handle_response::<ChatResponse>(response).await?;
+        if let Some(observer) = &self.observer {
+            observer.observe(ChatExchange {
+                chat_id: chat_response.id.clone(),
+                model: request.model,
+                request: body,
+                response: bytes,
+            });
+        }
 
         // Extract content from response, returning error if empty
         chat_response
@@ -133,6 +184,8 @@ impl NearAiClient {
     }
 
     /// Send a chat completion request with tool support.
+    ///
+    /// Not reported to the observer, so these responses aren't verified.
     #[instrument(skip(self, messages, tools), fields(message_count = messages.len()))]
     pub async fn chat_with_tools(
         &self,
@@ -141,6 +194,7 @@ impl NearAiClient {
         max_tokens: Option<u32>,
         tools: Option<&[ToolDefinition]>,
     ) -> Result<ChatResponseWithTools, NearAiError> {
+        self.warn_unverified("chat_with_tools");
         let request = ChatRequest {
             model: self.model.clone(),
             messages,
@@ -195,6 +249,9 @@ impl NearAiClient {
     }
 
     /// Send a streaming chat completion request.
+    ///
+    /// Not reported to the observer (the stream isn't kept byte-for-byte), so these
+    /// responses aren't verified.
     #[instrument(skip(self, messages), fields(message_count = messages.len()))]
     pub async fn chat_stream(
         &self,
@@ -202,6 +259,7 @@ impl NearAiClient {
         temperature: Option<f32>,
         max_tokens: Option<u32>,
     ) -> Result<impl Stream<Item = Result<String, NearAiError>>, NearAiError> {
+        self.warn_unverified("chat_stream");
         let request = ChatRequest {
             model: self.model.clone(),
             messages,
@@ -296,22 +354,6 @@ impl NearAiClient {
         ])
     }
 
-    /// Get attestation report from NEAR AI.
-    #[instrument(skip(self))]
-    pub async fn get_attestation(&self) -> Result<AttestationReport, NearAiError> {
-        let response = self
-            .client
-            .get(format!("{}/attestation", self.base_url))
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.api_key.expose_secret()),
-            )
-            .send()
-            .await?;
-
-        self.handle_response(response).await
-    }
-
     /// Send a chat completion request with automatic retry and exponential backoff.
     ///
     /// Retries on transient errors (network issues, rate limits) up to `max_retries` times.
@@ -389,6 +431,14 @@ impl NearAiClient {
                 warn!("NEAR AI health check failed: {}", e);
                 false
             }
+        }
+    }
+
+    /// Only `chat` reports to the observer; say so loudly if another path is used
+    /// while verification is on.
+    fn warn_unverified(&self, method: &str) {
+        if self.observer.is_some() {
+            warn!("NEAR AI {method} responses are not verified; use chat for verified replies");
         }
     }
 

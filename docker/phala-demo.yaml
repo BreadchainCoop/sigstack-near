@@ -38,7 +38,8 @@ services:
       - SIGNAL__PHONE_NUMBER=${SIGNAL_PHONE}
       - NEAR_AI__API_KEY=${NEAR_AI_API_KEY}
       - NEAR_AI__BASE_URL=https://cloud-api.near.ai/v1
-      - NEAR_AI__MODEL=deepseek-ai/DeepSeek-V4-Flash
+      - NEAR_AI__MODEL=deepseek-ai/DeepSeek-V4.1-Flash-1017
+      - NEAR_AI__VERIFY_RESPONSES=true
       - NEAR_AI__TIMEOUT=120s
       - WHISPER__ENABLED=true
       - WHISPER__SERVICE_URL=https://cloud-api.near.ai/v1
