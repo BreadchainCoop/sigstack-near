@@ -26,4 +26,4 @@ pub use attestation::Tee;
 pub use config::AgentConfig;
 pub use error::AgentError;
 pub use key::SigningKey;
-pub use registrar::{Registrar, Registration};
+pub use registrar::{AgentStatus, Registrar, Registration, RegistrationState};

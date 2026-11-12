@@ -56,6 +56,7 @@ async fn main() -> AppResult<()> {
     // it registered. Failures are logged and retried; they never stop the bot. This
     // runs after the Signal check, so a restart loop while signal-api starts doesn't
     // generate and fund a new agent account on every attempt.
+    let mut agent_status = None;
     if config.agent.enabled() {
         if !in_tee {
             warn!("AGENT__CONTRACT_ID set without a TEE - skipping agent registration");
@@ -67,6 +68,7 @@ async fn main() -> AppResult<()> {
                         registrar.account_id(),
                         config.agent.contract_id
                     );
+                    agent_status = Some(registrar.status());
                     tokio::spawn(registrar.run());
                 }
                 Err(e) => error!("Agent registration disabled: {e}"),
@@ -103,6 +105,7 @@ async fn main() -> AppResult<()> {
         dstack.clone(),
         bot_identity.clone(),
         bot_username,
+        agent_status,
     )
     .await?;
 

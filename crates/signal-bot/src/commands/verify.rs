@@ -5,10 +5,13 @@ use crate::error::AppResult;
 use async_trait::async_trait;
 use dstack_client::DstackClient;
 use hex;
+use near_agent::AgentStatus;
+use near_ai_client::verify::{ModelStatus, ModelVerifier};
 use sha2::{Digest, Sha256};
 use signal_bot_core::REPLY_BREAK;
 use signal_client::BotMessage;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::info;
 
 // Reply text, sent with Signal text styles (`**bold**`, `*italic*`, `` `mono` ``).
@@ -27,6 +30,24 @@ could register.";
 const NEAR_AI_NOTE: &str = "\
 **NEAR AI:** transcription and translation run on NEAR AI Cloud's GPU TEEs. Verify them \
 at https://docs.near.ai/cloud/verification/";
+const NEAR_AI_CHECKED_NOTE: &str = "\
+**NEAR AI:** how this bot checks the models: \
+https://docs.near.ai/cloud/verification/ and docs/model-verification.md in the source.";
+const SUMMARY_TITLE: &str = "**🔐 Is this bot what it says it is?**";
+const TEE_LINE: &str = "\
+✅ **This bot** runs in an Intel TDX TEE on Phala. Its quote, in the next message, signs \
+your challenge, so it's fresh.";
+const NO_QUOTE_LINE: &str = "⚠️ **This bot** runs in a TEE, but couldn't produce a quote just now.";
+const VOICE_UNSIGNED: &str = "NEAR AI doesn't sign individual transcripts yet.";
+
+type StatusSource = Arc<dyn Fn() -> Vec<ModelStatus> + Send + Sync>;
+
+/// The NEAR AI models this bot uses, and where their verification status comes from.
+struct ModelChecks {
+    status: StatusSource,
+    chat_model: String,
+    whisper_model: Option<String>,
+}
 
 /// Operator addresses for fund sweeping (from payment config).
 #[derive(Debug, Clone, Default)]
@@ -54,6 +75,10 @@ pub struct VerifyHandler {
     repo_url: Option<String>,
     /// Page listing approved builds (`BOT__VERIFIER_URL`).
     verifier_url: Option<String>,
+    /// This boot's agent registration, when agent registration is on.
+    agent: Option<Arc<AgentStatus>>,
+    /// NEAR AI model checks, when response verification is on.
+    models: Option<ModelChecks>,
 }
 
 impl VerifyHandler {
@@ -63,7 +88,44 @@ impl VerifyHandler {
             operator_addresses: None,
             repo_url: None,
             verifier_url: None,
+            agent: None,
+            models: None,
         }
+    }
+
+    /// Reports this boot's registration with the agent contract.
+    pub fn with_agent(mut self, agent: Option<Arc<AgentStatus>>) -> Self {
+        self.agent = agent;
+        self
+    }
+
+    /// Reports what `verifier` has found about the chat model and, if voice is on,
+    /// the Whisper model.
+    pub fn with_model_verifier(
+        self,
+        verifier: Arc<ModelVerifier>,
+        chat_model: impl Into<String>,
+        whisper_model: Option<String>,
+    ) -> Self {
+        self.with_model_status(
+            Arc::new(move || verifier.status()),
+            chat_model,
+            whisper_model,
+        )
+    }
+
+    fn with_model_status(
+        mut self,
+        status: StatusSource,
+        chat_model: impl Into<String>,
+        whisper_model: Option<String>,
+    ) -> Self {
+        self.models = Some(ModelChecks {
+            status,
+            chat_model: chat_model.into(),
+            whisper_model,
+        });
+        self
     }
 
     /// Links the reply's code check to the source repo and the verifier page. Blank
@@ -85,6 +147,8 @@ impl VerifyHandler {
             operator_addresses: Some(addresses),
             repo_url: None,
             verifier_url: None,
+            agent: None,
+            models: None,
         }
     }
 
@@ -179,6 +243,10 @@ impl VerifyHandler {
     }
 
     fn format_response(&self, result: AttestationResult) -> String {
+        self.format_response_at(result, SystemTime::now())
+    }
+
+    fn format_response_at(&self, result: AttestationResult, now: SystemTime) -> String {
         let mut lines = vec![];
 
         if !result.in_tee {
@@ -192,6 +260,20 @@ impl VerifyHandler {
             lines.push("Your messages may not be private.".into());
             return lines.join("\n");
         }
+
+        // Plain-language summary first, then the details behind each line.
+        lines.push(SUMMARY_TITLE.into());
+        lines.push(
+            if result.quote.is_some() {
+                TEE_LINE
+            } else {
+                NO_QUOTE_LINE
+            }
+            .into(),
+        );
+        lines.extend(self.agent_summary(now));
+        lines.extend(self.model_summary(now));
+        lines.push(String::new());
 
         lines.push("**🔐 TEE attestation**".into());
         lines.push(String::new());
@@ -227,6 +309,8 @@ impl VerifyHandler {
         if let Some(id) = &result.app_id {
             lines.push(format!("**App ID:** `{id}`"));
         }
+        lines.extend(self.agent_details());
+        lines.extend(self.model_details(now));
 
         if result.quote.is_some() {
             lines.push(String::new());
@@ -262,7 +346,14 @@ impl VerifyHandler {
         }
 
         lines.push(String::new());
-        lines.push(NEAR_AI_NOTE.into());
+        lines.push(
+            if self.models.is_some() {
+                NEAR_AI_CHECKED_NOTE
+            } else {
+                NEAR_AI_NOTE
+            }
+            .into(),
+        );
 
         // The quote goes out as its own message, one unbroken hex string, so it copies whole.
         let mut reply = lines.join("\n");
@@ -272,6 +363,217 @@ impl VerifyHandler {
         }
         reply
     }
+}
+
+impl VerifyHandler {
+    fn agent_summary(&self, now: SystemTime) -> Option<String> {
+        let agent = self.agent.as_ref()?;
+        let state = agent.state();
+        let who = format!(
+            "agent `{}` with {}",
+            short(&agent.account_id),
+            agent.contract_id
+        );
+        Some(match (&state.registration, &state.last_error) {
+            (Some(reg), _) if reg.valid_until_ms > unix_ms(now) => format!(
+                "✅ **Its code** is a build approved on NEAR: it registered as {who}. {}",
+                explorer(&agent.contract_id, "txns", &reg.tx_hash)
+            ),
+            (Some(_), _) => format!("⚠️ **Its code:** the registration of {who} has expired."),
+            (None, Some(err)) => format!("⏳ **Its code:** {who} isn't registered yet: {err}"),
+            (None, None) => format!("⏳ **Its code:** {who} is registering now."),
+        })
+    }
+
+    fn agent_details(&self) -> Vec<String> {
+        let Some(agent) = &self.agent else {
+            return vec![];
+        };
+        let mut line = format!(
+            "**Agent:** `{}` {}",
+            agent.account_id,
+            explorer(&agent.contract_id, "address", &agent.account_id)
+        );
+        if let Some(reg) = agent.state().registration {
+            line.push_str(&format!(
+                "\nRegistered in tx `{}`, valid until {}",
+                reg.tx_hash,
+                utc(reg.valid_until_ms)
+            ));
+        }
+        vec![line]
+    }
+
+    fn model_summary(&self, now: SystemTime) -> Vec<String> {
+        let Some(models) = &self.models else {
+            return vec![];
+        };
+        let statuses = (models.status)();
+        let find = |model: &str| statuses.iter().find(|s| s.model == model);
+
+        let chat = find(&models.chat_model);
+        let chat_line = match chat.filter(|s| s.instance.is_some()) {
+            None => format!(
+                "⏳ **Translations:** {} hasn't been attested yet.{}",
+                model_name(&models.chat_model),
+                failure_suffix(chat)
+            ),
+            Some(s) => {
+                let replies = match (s.verified_responses, s.failed_responses) {
+                    (0, 0) => " No replies checked yet.".to_string(),
+                    (ok, failed) => format!(
+                        " {ok} of {} replies checked so far carried its signature.",
+                        ok + failed
+                    ),
+                };
+                let (icon, failure) = if failing_now(s) {
+                    ("⚠️", failure_suffix(Some(s)))
+                } else {
+                    ("✅", String::new())
+                };
+                format!(
+                    "{icon} **Translations** come from {} in an attested NEAR AI GPU TEE \
+                     ({}).{replies}{failure}",
+                    model_name(&models.chat_model),
+                    ago(attested_at(s), now),
+                )
+            }
+        };
+        let mut lines = vec![chat_line];
+        if let Some(whisper) = &models.whisper_model {
+            let w = find(whisper);
+            lines.push(match w.filter(|s| s.instance.is_some()) {
+                Some(s) => format!(
+                    "✅ **Voice** is transcribed by {} in an attested NEAR AI GPU TEE ({}). \
+                     {VOICE_UNSIGNED}",
+                    model_name(whisper),
+                    ago(attested_at(s), now)
+                ),
+                None => format!(
+                    "⏳ **Voice:** {} hasn't been attested yet.{}",
+                    model_name(whisper),
+                    failure_suffix(w)
+                ),
+            });
+        }
+        lines
+    }
+
+    fn model_details(&self, now: SystemTime) -> Vec<String> {
+        let Some(models) = &self.models else {
+            return vec![];
+        };
+        let statuses = (models.status)();
+        let mut lines = vec![String::new(), "**NEAR AI models**".to_string()];
+        let names = std::iter::once(&models.chat_model).chain(models.whisper_model.as_ref());
+        for model in names {
+            let status = statuses.iter().find(|s| &s.model == model);
+            let Some((s, instance)) = status.and_then(|s| Some((s, s.instance.as_ref()?))) else {
+                lines.push(format!("- `{model}`: not attested yet"));
+                continue;
+            };
+            let advisories = if instance.advisory_ids.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", instance.advisory_ids.join(", "))
+            };
+            let mut line = format!(
+                "- `{model}`: signing key `{}`, compose hash `{}`, Intel TCB {}{advisories}, \
+                 {} GPUs passed NVIDIA's check, {}.",
+                short(&instance.signing_key),
+                short(&instance.compose_hash),
+                instance.tcb_status,
+                instance.gpus,
+                ago(instance.verified_at, now)
+            );
+            if model == &models.chat_model {
+                line.push_str(&format!(
+                    " Replies: {} verified, {} failed.",
+                    s.verified_responses, s.failed_responses
+                ));
+            }
+            lines.push(line);
+        }
+        lines
+    }
+}
+
+/// When the model's current instance was attested. Only called with one present.
+fn attested_at(status: &ModelStatus) -> SystemTime {
+    status
+        .instance
+        .as_ref()
+        .map_or(UNIX_EPOCH, |i| i.verified_at)
+}
+
+/// Whether the model's latest event was a failure: a failed check newer than both
+/// the last verified reply and the last attestation.
+fn failing_now(status: &ModelStatus) -> bool {
+    let Some(failure) = &status.last_failure else {
+        return false;
+    };
+    let newest_ok = [
+        status.last_verified_at,
+        status.instance.as_ref().map(|i| i.verified_at),
+    ]
+    .into_iter()
+    .flatten()
+    .max();
+    newest_ok.is_none_or(|ok| failure.at > ok)
+}
+
+fn failure_suffix(status: Option<&ModelStatus>) -> String {
+    match status.and_then(|s| s.last_failure.as_ref()) {
+        Some(failure) => format!(" Last check failed: {}", failure.error),
+        None => String::new(),
+    }
+}
+
+/// `deepseek-ai/DeepSeek-V4.1-Flash-1017` → `DeepSeek-V4.1-Flash-1017`.
+fn model_name(model: &str) -> &str {
+    model.rsplit('/').next().unwrap_or(model)
+}
+
+/// Long hex as `01234567…cdef`.
+fn short(s: &str) -> String {
+    let n = s.chars().count();
+    if n <= 16 {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(8).collect();
+    let tail: String = s.chars().skip(n - 4).collect();
+    format!("{head}…{tail}")
+}
+
+fn ago(then: SystemTime, now: SystemTime) -> String {
+    let secs = now.duration_since(then).unwrap_or_default().as_secs();
+    match secs {
+        0..=59 => "checked just now".into(),
+        60..=3599 => format!("checked {} min ago", secs / 60),
+        _ => format!("checked {} h ago", secs / 3600),
+    }
+}
+
+fn unix_ms(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis() as u64
+}
+
+fn utc(ms: u64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms as i64)
+        .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
+        .unwrap_or_else(|| format!("{ms} ms"))
+}
+
+/// A NEAR explorer link on the contract's network.
+fn explorer(contract_id: &str, kind: &str, id: &str) -> String {
+    let host = if contract_id.ends_with(".testnet") {
+        "testnet.nearblocks.io"
+    } else {
+        "nearblocks.io"
+    };
+    format!("https://{host}/{kind}/{id}")
 }
 
 #[derive(Default)]
@@ -656,5 +958,243 @@ mod tests {
             solana: None,
         }
         .has_any());
+    }
+
+    // ---- Both layers: agent registration and NEAR AI model checks ----
+
+    use near_agent::{AgentError, Registration};
+    use near_ai_client::verify::{AttestedInstance, Failure, VerifierConfig};
+
+    const CHAT: &str = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
+    const WHISPER: &str = "openai/whisper-large-v3";
+    const AGENT: &str = "60b051d8aaa7c107d720d29fc016cf837ca915d5fe11637158bdc59c7912a661";
+
+    fn at(secs: u64) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    fn quoted() -> AttestationResult {
+        AttestationResult {
+            in_tee: true,
+            compose_hash: Some("abc123".into()),
+            quote: Some("0400".into()),
+            challenge: Some("c".into()),
+            report_data_hex: Some("63".into()),
+            ..Default::default()
+        }
+    }
+
+    fn summary(response: &str) -> &str {
+        response.split("**🔐 TEE attestation**").next().unwrap()
+    }
+
+    fn instance(model: &str, verified_at: SystemTime) -> AttestedInstance {
+        AttestedInstance {
+            model: model.into(),
+            signing_key: "236f5a6b91dd47dc3b7b36e43d4eb531a042ffb8f8fbf3a1555b78cef4fdda4c".into(),
+            compose_hash: "c53e254e8b70aa14b45ba3043730a0736ca2afb1df7fa3db9c61578845e470fe"
+                .into(),
+            tcb_status: "UpToDate".into(),
+            advisory_ids: vec![],
+            gpus: 8,
+            verified_at,
+        }
+    }
+
+    fn with_statuses(statuses: Vec<ModelStatus>, whisper: bool) -> VerifyHandler {
+        create_test_handler().with_model_status(
+            Arc::new(move || statuses.clone()),
+            CHAT,
+            whisper.then(|| WHISPER.to_string()),
+        )
+    }
+
+    #[test]
+    fn summary_comes_first_in_plain_language() {
+        let response = create_test_handler().format_response(quoted());
+        assert!(response.starts_with(SUMMARY_TITLE));
+        assert!(summary(&response).contains("✅ **This bot** runs in an Intel TDX TEE"));
+        // Without agent or model checks, the old NEAR AI pointer stays.
+        assert!(response.contains(NEAR_AI_NOTE));
+
+        let mut no_quote = quoted();
+        no_quote.quote = None;
+        no_quote.error = Some("socket closed".into());
+        let response = create_test_handler().format_response(no_quote);
+        assert!(summary(&response).contains("couldn't produce a quote"));
+    }
+
+    #[test]
+    fn reports_the_agent_registration_with_explorer_links() {
+        let now = at(1_800_000_000);
+        let status = Arc::new(AgentStatus::new(AGENT, "agent.sigstack.testnet"));
+        let handler = create_test_handler().with_agent(Some(status.clone()));
+
+        let pending = handler.format_response_at(quoted(), now);
+        assert!(summary(&pending).contains("⏳ **Its code:** agent `60b051d8…a661`"));
+        assert!(summary(&pending).contains("registering now"));
+        assert!(pending.contains(&format!(
+            "**Agent:** `{AGENT}` https://testnet.nearblocks.io/address/{AGENT}"
+        )));
+
+        status.record(&Err(AgentError::TxFailed("wrong expected_measurements".into())));
+        let failing = handler.format_response_at(quoted(), now);
+        assert!(summary(&failing).contains("isn't registered yet: transaction failed"));
+
+        status.record(&Ok(Registration {
+            account_id: AGENT.into(),
+            tx_hash: "8F1gnMdfnXivCfwzp9t9g1guLE66bt8bYxAJ9odx9tCD".into(),
+            valid_until_ms: 1_800_600_000_000,
+        }));
+        let registered = handler.format_response_at(quoted(), now);
+        assert!(summary(&registered).contains(
+            "✅ **Its code** is a build approved on NEAR: it registered as agent \
+             `60b051d8…a661` with agent.sigstack.testnet. \
+             https://testnet.nearblocks.io/txns/8F1gnMdfnXivCfwzp9t9g1guLE66bt8bYxAJ9odx9tCD"
+        ));
+        assert!(registered.contains(
+            "Registered in tx `8F1gnMdfnXivCfwzp9t9g1guLE66bt8bYxAJ9odx9tCD`, valid until \
+             2027-01-22 06:40 UTC"
+        ));
+
+        let expired = handler.format_response_at(quoted(), at(1_900_000_000));
+        assert!(summary(&expired).contains("agent.sigstack.testnet has expired"));
+    }
+
+    #[test]
+    fn reports_both_models_when_verified() {
+        let now = at(1_800_000_000);
+        let chat = ModelStatus {
+            model: CHAT.into(),
+            instance: Some(instance(CHAT, at(1_800_000_000 - 720))),
+            verified_responses: 41,
+            failed_responses: 0,
+            last_verified_at: Some(at(1_799_999_990)),
+            last_failure: None,
+        };
+        let mut voice_instance = instance(WHISPER, at(1_800_000_000 - 7_300));
+        voice_instance.advisory_ids = vec!["INTEL-SA-00837".into()];
+        let voice = ModelStatus {
+            model: WHISPER.into(),
+            instance: Some(voice_instance),
+            ..Default::default()
+        };
+        let response = with_statuses(vec![chat, voice], true).format_response_at(quoted(), now);
+
+        let top = summary(&response);
+        assert!(top.contains(
+            "✅ **Translations** come from DeepSeek-V4.1-Flash-1017 in an attested NEAR AI GPU \
+             TEE (checked 12 min ago). 41 of 41 replies checked so far carried its signature."
+        ));
+        assert!(top.contains(
+            "✅ **Voice** is transcribed by whisper-large-v3 in an attested NEAR AI GPU TEE \
+             (checked 2 h ago). NEAR AI doesn't sign individual transcripts yet."
+        ));
+        assert!(response.contains("**NEAR AI models**"));
+        assert!(response.contains(
+            "- `deepseek-ai/DeepSeek-V4.1-Flash-1017`: signing key `236f5a6b…da4c`, compose hash \
+             `c53e254e…70fe`, Intel TCB UpToDate, 8 GPUs passed NVIDIA's check, checked 12 min \
+             ago. Replies: 41 verified, 0 failed."
+        ));
+        assert!(response.contains("Intel TCB UpToDate (INTEL-SA-00837)"));
+        assert!(response.contains(NEAR_AI_CHECKED_NOTE));
+        // The quote is still the one separate message.
+        assert_eq!(response.split(REPLY_BREAK).count(), 2);
+    }
+
+    #[test]
+    fn flags_only_a_failure_that_is_still_current() {
+        let now = at(1_800_000_000);
+        let failure = |secs| Failure {
+            at: at(secs),
+            error: "response signature: signed by the gateway, not the model's TEE".into(),
+        };
+        let status = |failure_at| ModelStatus {
+            model: CHAT.into(),
+            instance: Some(instance(CHAT, at(1_799_999_000))),
+            verified_responses: 9,
+            failed_responses: 1,
+            last_verified_at: Some(at(1_799_999_500)),
+            last_failure: Some(failure(failure_at)),
+        };
+
+        let current = with_statuses(vec![status(1_799_999_900)], false)
+            .format_response_at(quoted(), now);
+        assert!(summary(&current).contains("⚠️ **Translations**"));
+        assert!(summary(&current).contains("9 of 10 replies"));
+        assert!(summary(&current).contains("Last check failed: response signature: signed by"));
+
+        let cleared = with_statuses(vec![status(1_799_999_100)], false)
+            .format_response_at(quoted(), now);
+        assert!(summary(&cleared).contains("✅ **Translations**"));
+        assert!(!summary(&cleared).contains("Last check failed"));
+        // No Whisper line when voice is off.
+        assert!(!cleared.contains("**Voice**"));
+    }
+
+    #[test]
+    fn reports_models_not_attested_yet() {
+        let now = at(1_800_000_000);
+        let chat = ModelStatus {
+            model: CHAT.into(),
+            last_failure: Some(Failure {
+                at: at(1_799_999_000),
+                error: "attestation: GPU: NRAS: HTTP 503".into(),
+            }),
+            ..Default::default()
+        };
+        let response = with_statuses(vec![chat], true).format_response_at(quoted(), now);
+        let top = summary(&response);
+        assert!(top.contains(
+            "⏳ **Translations:** DeepSeek-V4.1-Flash-1017 hasn't been attested yet. Last check \
+             failed: attestation: GPU: NRAS: HTTP 503"
+        ));
+        assert!(top.contains("⏳ **Voice:** whisper-large-v3 hasn't been attested yet."));
+        assert!(response.contains("- `openai/whisper-large-v3`: not attested yet"));
+
+        // Attested, but no replies yet.
+        let fresh = ModelStatus {
+            model: CHAT.into(),
+            instance: Some(instance(CHAT, now)),
+            ..Default::default()
+        };
+        let response = with_statuses(vec![fresh], false).format_response_at(quoted(), now);
+        assert!(summary(&response).contains("(checked just now). No replies checked yet."));
+    }
+
+    #[tokio::test]
+    async fn reads_a_live_verifier() {
+        let verifier = Arc::new(
+            ModelVerifier::new(VerifierConfig::new("http://127.0.0.1:9"), "key").unwrap(),
+        );
+        let handler = create_test_handler().with_model_verifier(verifier, CHAT, None);
+        let response = handler.format_response(quoted());
+        assert!(summary(&response).contains("hasn't been attested yet."));
+    }
+
+    #[test]
+    fn formatting_helpers() {
+        assert_eq!(short("abc"), "abc");
+        assert_eq!(short(AGENT), "60b051d8…a661");
+        assert_eq!(model_name("openai/whisper-large-v3"), "whisper-large-v3");
+        assert_eq!(model_name("plain"), "plain");
+        assert_eq!(ago(at(0), at(59)), "checked just now");
+        assert_eq!(ago(at(0), at(3_599)), "checked 59 min ago");
+        assert_eq!(ago(at(10), at(0)), "checked just now");
+        assert_eq!(ago(at(0), at(7_200)), "checked 2 h ago");
+        assert_eq!(utc(0), "1970-01-01 00:00 UTC");
+        assert_eq!(utc(i64::MAX as u64), format!("{} ms", i64::MAX));
+        assert_eq!(
+            explorer("agent.near", "txns", "abc"),
+            "https://nearblocks.io/txns/abc"
+        );
+        let mut empty = ModelStatus::default();
+        assert_eq!(attested_at(&empty), UNIX_EPOCH);
+        assert!(!failing_now(&empty));
+        empty.last_failure = Some(Failure {
+            at: at(1),
+            error: "e".into(),
+        });
+        assert!(failing_now(&empty));
     }
 }

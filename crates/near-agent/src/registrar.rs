@@ -14,7 +14,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
@@ -48,6 +48,55 @@ pub struct Registration {
     pub valid_until_ms: u64,
 }
 
+/// What the registrar has managed so far, for the bot to report.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RegistrationState {
+    /// The latest successful registration this boot.
+    pub registration: Option<Registration>,
+    /// Why the latest attempt failed, if it did.
+    pub last_error: Option<String>,
+}
+
+/// Shared view of this boot's agent registration. Clone the `Arc` from
+/// [`Registrar::status`] before spawning [`Registrar::run`].
+#[derive(Debug)]
+pub struct AgentStatus {
+    pub account_id: String,
+    pub contract_id: String,
+    state: Mutex<RegistrationState>,
+}
+
+impl AgentStatus {
+    pub fn new(account_id: impl Into<String>, contract_id: impl Into<String>) -> Self {
+        Self {
+            account_id: account_id.into(),
+            contract_id: contract_id.into(),
+            state: Mutex::default(),
+        }
+    }
+
+    pub fn state(&self) -> RegistrationState {
+        self.lock().clone()
+    }
+
+    /// Records an attempt: a success replaces the registration and clears the error;
+    /// a failure keeps the last registration, which stays valid until it expires.
+    pub fn record(&self, attempt: &Result<Registration, AgentError>) {
+        let mut state = self.lock();
+        match attempt {
+            Ok(registration) => {
+                state.registration = Some(registration.clone());
+                state.last_error = None;
+            }
+            Err(e) => state.last_error = Some(e.to_string()),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, RegistrationState> {
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 pub struct Registrar {
     tee: Arc<dyn Tee>,
     rpc: NearRpc,
@@ -61,6 +110,7 @@ pub struct Registrar {
     pccs_endpoints: Vec<String>,
     /// Approval args are logged on the first attempt of each boot.
     approval_logged: AtomicBool,
+    status: Arc<AgentStatus>,
 }
 
 impl Registrar {
@@ -76,6 +126,11 @@ impl Registrar {
     ) -> Result<Self, AgentError> {
         config.validate()?;
         let (min_balance, top_up_balance) = config.balances()?;
+        let contract_id = config.contract_id.trim().to_string();
+        let status = Arc::new(AgentStatus::new(
+            agent.implicit_account_id(),
+            contract_id.clone(),
+        ));
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()?;
@@ -86,12 +141,18 @@ impl Registrar {
             agent,
             sponsor: SigningKey::from_near_secret(&config.sponsor_private_key)?,
             sponsor_id: config.sponsor_account_id.trim().to_string(),
-            contract_id: config.contract_id.trim().to_string(),
+            contract_id,
             min_balance,
             top_up_balance,
             pccs_endpoints: config.pccs_endpoints(),
             approval_logged: AtomicBool::new(false),
+            status,
         })
+    }
+
+    /// This boot's registration status, updated by [`Registrar::run`].
+    pub fn status(&self) -> Arc<AgentStatus> {
+        self.status.clone()
     }
 
     /// This boot's agent account: the implicit account of the random key.
@@ -291,7 +352,9 @@ impl Registrar {
     pub async fn run(self) {
         let mut retry = MIN_RETRY_DELAY;
         loop {
-            let delay = match self.register().await {
+            let attempt = self.register().await;
+            self.status.record(&attempt);
+            let delay = match attempt {
                 Ok(reg) => {
                     info!(
                         "Registered agent {} with {} (tx {}), valid until {} ms",
@@ -512,6 +575,32 @@ mod tests {
         let end = signed.len() - SIGNATURE_LEN;
         let delegate = signed[tag_at + 1..end - SIGNATURE_LEN].to_vec();
         (delegate, signed[end - 64..end].to_vec())
+    }
+
+    #[test]
+    fn status_keeps_the_registration_through_a_failed_refresh() {
+        let status = AgentStatus::new("agent", "contract.testnet");
+        assert_eq!(status.state(), RegistrationState::default());
+        let registration = Registration {
+            account_id: "agent".into(),
+            tx_hash: "tx".into(),
+            valid_until_ms: 5,
+        };
+        status.record(&Ok(registration.clone()));
+        status.record(&Err(AgentError::Rpc("down".into())));
+        let state = status.state();
+        assert_eq!(state.registration, Some(registration.clone()));
+        assert_eq!(state.last_error.as_deref(), Some("NEAR RPC: down"));
+        status.record(&Ok(registration));
+        assert_eq!(status.state().last_error, None);
+    }
+
+    #[tokio::test]
+    async fn status_names_this_boots_agent_and_contract() {
+        let f = fixture(Some(NEAR * 3 / 1000), json!({ "valid_until_ms": "1" })).await;
+        let status = f.registrar.status();
+        assert_eq!(status.account_id, f.agent_id);
+        assert_eq!(status.contract_id, "sigstack-agent.testnet");
     }
 
     #[tokio::test]
