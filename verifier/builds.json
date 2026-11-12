@@ -1,12 +1,22 @@
 [
   {
+    "compose_hash": "aa6d2877538eba1f5c33abde80547da1917ff640101b95d02b72143d7c1be536",
+    "app_compose": "builds/aa6d2877538eba1f5c33abde80547da1917ff640101b95d02b72143d7c1be536.json",
+    "images_commit": "ec3dd267df75f9ec82298cafd3aba7fa315da8d7",
+    "images_run": 43297463975,
+    "compose_commit": "2d946623c0ee5baae2a72c5202c46db32d2ba7bf",
+    "pinned_in_pr": 68,
+    "summary": "Current demo build. Sets the bot's Signal profile at startup: the name Sigstack, an about line and a profile picture compiled into the binary, so people who haven't saved the number see who it is.",
+    "provenance": "github"
+  },
+  {
     "compose_hash": "1c58c2e759bebc4f91a384cc1dd6cca4cb97dca1d3eecfb84bd910b79c5a8993",
     "app_compose": "builds/1c58c2e759bebc4f91a384cc1dd6cca4cb97dca1d3eecfb84bd910b79c5a8993.json",
     "images_commit": "8c19dd0a37f3f355aaa693b30cef45fc14c6916a",
     "images_run": 43261137238,
     "compose_commit": "d4125a138043e00337b9178e5f940925d5746fa0",
     "pinned_in_pr": 65,
-    "summary": "Current demo build. !transcribe works as a reply to any voice note, including in chats without auto-transcribe, and the bot pauses 1 s between Signal receive polls so sends and typing calls get the account sooner.",
+    "summary": "!transcribe works as a reply to any voice note, including in chats without auto-transcribe, and the bot pauses 1 s between Signal receive polls; replaced by aa6d2877.",
     "provenance": "github"
   },
   {

@@ -152,9 +152,9 @@ The deployed code is traceable to this repo:
   `near account view-account-summary agent.sigstack.testnet network-config testnet now`.
 
 The demo bot is registered. At the time of writing, its agent account is
-[`b693f616…342c`](https://testnet.nearblocks.io/address/b693f61634b73b545d0f5746848ca9e713f6b215650b3744f20395a0f363342c),
+[`30adc77b…64ed`](https://testnet.nearblocks.io/address/30adc77b1cd93c951c58e03a097796f1c445f1ff14e9c8c8afbd0ef5ad3b64ed),
 registered in
-[`Ro1Kr3w4…NmCA`](https://testnet.nearblocks.io/txns/Ro1Kr3w41bVsA2XdiCzgqTm3hHkBTRuKjS2RVQoNmCA),
+[`DRqsidZd…HUGj`](https://testnet.nearblocks.io/txns/DRqsidZdTDivnZdqR8gh49XiYHMZbHm42eHuzJ8fHUGj),
 relayed by the sponsor as a NEP-366 meta-transaction.
 The bot makes a new key on every boot, so after a restart the current one is the newest entry in
 `get_agents`. Registration lasts 7 days, and the bot re-registers before it expires.
@@ -163,7 +163,7 @@ To tie the registered bot to this repo:
 
 1. In `get_agents`, its `measurements.app_compose_hash_payload` is the compose hash the contract
    checked against the TDX quote. For the demo it is
-   `1c58c2e759bebc4f91a384cc1dd6cca4cb97dca1d3eecfb84bd910b79c5a8993`.
+   `aa6d2877538eba1f5c33abde80547da1917ff640101b95d02b72143d7c1be536`.
 2. That hash is the sha256 of
    [`docker/phala-demo.app-compose.json`](docker/phala-demo.app-compose.json), which wraps
    [`docker/phala-demo.yaml`](docker/phala-demo.yaml) unchanged. See
@@ -182,7 +182,7 @@ The bot answers with two messages. The first has:
   quote's report data.
 - **Report data:** the challenge in hex. Check it with
   `printf '%s' 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
-- **Compose hash:** should be `1c58c2e7…8993`, the same as above.
+- **Compose hash:** should be `aa6d2877…e536`, the same as above.
 - **How to verify:** the same three checks as here, with links to the verifier page and this repo.
 
 The second message is the TDX quote alone. Long-press it, copy it, and paste it into
