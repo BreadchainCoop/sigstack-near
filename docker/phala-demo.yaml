@@ -32,7 +32,7 @@ services:
     restart: unless-stopped
 
   signal-bot:
-    image: ghcr.io/breadchaincoop/sigstack-near-bot-tee@sha256:ea5f14e930856a1d2c76f343d7d16db1c944a0480210b67e4380c9ac95d264d7
+    image: ghcr.io/breadchaincoop/sigstack-near-bot-tee@sha256:359c147ce9e71d006b21bd45df1f4102a7ac6a118b427e8b62094b5b0ee9c30f
     environment:
       - SIGNAL__SERVICE_URL=http://signal-api:8080
       - SIGNAL__PHONE_NUMBER=${SIGNAL_PHONE}
@@ -54,6 +54,9 @@ services:
       - BOT__SIGNAL_USERNAME=sigstackdemo
       - BOT__GITHUB_REPO=https://github.com/BreadchainCoop/sigstack-near
       - BOT__VERIFIER_URL=https://breadchaincoop.github.io/sigstack-near/
+      - BOT__PROFILE_NAME=Sigstack
+      - BOT__PROFILE_ABOUT=Private translation and transcription in a TEE
+      - BOT__PROFILE_AVATAR=true
       - DSTACK__SOCKET_PATH=/var/run/dstack.sock
       - GROUP_PREFERENCES__PERSIST=true
       - GROUP_PREFERENCES__STORAGE_PATH=/data/group_prefs.enc
