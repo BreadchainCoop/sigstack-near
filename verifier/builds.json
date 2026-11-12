@@ -4,6 +4,7 @@
     "app_compose": "builds/5f0f9eb93ca24ec56a5fe9e6cf4adc10ead8ea4da5d02be893d990c91ee1cd6b.json",
     "images_commit": "9cac0eb20d6b5547dcd0653bd60690e4d8534b75",
     "images_run": 43138135692,
+    "compose_commit": "d5755494c7783c0a55eaf33787b8bf70d6e77d86",
     "pinned_in_pr": 54,
     "summary": "Current demo build. Verifies NEAR AI: each translation must be signed by an attested model GPU TEE (Intel TDX quote, NVIDIA GPUs), and Whisper is re-attested every half hour. !verify reports the agent registration and these model checks."
   },
@@ -12,6 +13,7 @@
     "app_compose": "builds/812dae7d598a7258fc0fafd6caa2fb142b34a8d4268b685910cc64c992142cde.json",
     "images_commit": "2b6647b5d27179baf51b7e48fcfa28d1dd586734",
     "images_run": 43117613180,
+    "compose_commit": "f87476201295629b8652064b31e6b37ee7543a2a",
     "pinned_in_pr": 47,
     "summary": "The agent pays for its own transfer when it returns refunded registration deposits, so each boot's account keeps only about 0.003 NEAR; replaced by 5f0f9eb9."
   },
@@ -20,6 +22,7 @@
     "app_compose": "builds/0634364c719686c10c774bbfd9ea051303f393a6b36452e5c475104bf8fe5a70.json",
     "images_commit": "4770a6ba4091700d7ff24b03b10b7012263e0a36",
     "images_run": 43112499901,
+    "compose_commit": "6cd60035a830f76f91bee12e47c3530ffcda4d9c",
     "pinned_in_pr": 42,
     "summary": "Native signal-cli for faster replies, failed relayed calls reported with the contract's error, typing calls off the reply path, and a low-sponsor warning; replaced by 812dae7d."
   },
@@ -28,6 +31,7 @@
     "app_compose": "builds/05be66bc30f35a0387ae933b98e35f6a4830dcc45d80481312208fba75fdc947.json",
     "images_commit": "939316e5e62678c11283169c8d562d0e530aa7ee",
     "images_run": 43106581693,
+    "compose_commit": "3e6d86722b55b32523d37146e5afc48fa9fc8f06",
     "pinned_in_pr": 39,
     "summary": "The sponsor relays registration as a meta-transaction, so each boot's account holds only 0.003 NEAR. Styled replies, a copyable !verify quote, and a typing indicator while commands run; replaced by 0634364c."
   },
@@ -36,6 +40,7 @@
     "app_compose": "builds/a949c1ffaf5aede815321e6a3fc7bb4190637522f38bb841ff13fe50051b507d.json",
     "images_commit": "bba9335dd65836e678bf9df1bb52a10d338a5ad3",
     "images_run": 43081163816,
+    "compose_commit": "35eb10073a2a257d1335e10f92603521ac604cf6",
     "pinned_in_pr": 27,
     "summary": "Funds each agent account enough for prepaid gas, and registers only after the Signal check passes; replaced by 05be66bc."
   },
@@ -44,6 +49,7 @@
     "app_compose": "builds/3b1c070a5c9ddafc7e3a0de188454d7ec298305bce66769128fece44b66d7905.json",
     "images_commit": "d9a75fcc73d154c5e4e1236d1176a95507c9e61f",
     "images_run": 43063521971,
+    "compose_commit": "dec9af2f3f8869b4e734c0029b4635b0bc309b7a",
     "pinned_in_pr": 22,
     "summary": "First demo build. Registered, but funded agents too little for prepaid gas; replaced by a949c1ff."
   }

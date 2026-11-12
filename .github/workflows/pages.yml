@@ -27,8 +27,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Published builds hash to their compose hashes
-        run: python3 verifier/check_builds.py
+        with:
+          # The checker reads each build's compose file at the commit that pinned it.
+          fetch-depth: 0
+      - name: Published builds trace to this repo and its images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 verifier/check_builds.py --git --registry
       - name: Page script parses
         run: |
           python3 - <<'EOF'

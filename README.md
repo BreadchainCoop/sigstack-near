@@ -59,7 +59,17 @@ archived under [`verifier/builds/`](verifier/builds), indexed by
    prints nothing: the attested compose is this repo's file.
 3. In that file, read the image digests. Each is tagged `sha-<commit>` in
    `ghcr.io/breadchaincoop/sigstack-near-*`, built by the [`images`](.github/workflows/images.yml)
-   workflow from that commit of this repo.
+   workflow from that commit of this repo. Images built since that workflow started signing
+   provenance also carry a GitHub attestation of the commit and run. Check its signature with
+   `gh attestation verify oci://<image>@<digest> --repo BreadchainCoop/sigstack-near`.
+
+For an older build, use its archived file in step 1 and its `compose_commit` from
+`builds.json` in step 2 (`git show <compose_commit>:docker/phala-demo.yaml`). The rest of
+`app_compose` is the CVM settings and Phala's pre-launch script. They can't be regenerated
+from this repo, so they're checked as published. On every change to the archive, CI runs
+[`verifier/check_builds.py --git --registry`](verifier/check_builds.py). It checks all
+three steps for every build, plus the provenance signature for builds recorded with
+`"provenance": "github"`.
 
 Every code change produces a new digest, so a new compose hash that must be approved
 on-chain before the bot can register. Upgrades are public by construction.
@@ -115,7 +125,8 @@ They run against mock dstack, PCCS and RPC servers.
 
 The quickest way is the **[verifier page](https://breadchaincoop.github.io/sigstack-near/)**. It reads
 the contract live and shows the registered bot and every approved build. For each build it hashes
-the published `app_compose` in your browser, and lists the image digests that build pins. It also
+the published `app_compose` in your browser. It links the commit whose compose file it is, and
+lists the image digests the build pins, each with what GitHub's signed provenance says built it. It also
 checks the contract's on-chain code against the CI-built wasm, and says what is and isn't verified.
 It's one static file, [`verifier/index.html`](verifier/index.html), and needs no tooling. Opened
 locally, it fetches the build files from `main`.

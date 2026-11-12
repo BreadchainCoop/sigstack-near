@@ -21,6 +21,9 @@ on:
 permissions:
   contents: read
   packages: write
+  # Signed build provenance: the OIDC token proves which workflow run and commit built a digest.
+  id-token: write
+  attestations: write
 
 concurrency:
   group: images-${{ github.ref }}
@@ -72,6 +75,20 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      # GitHub-signed SLSA provenance tying the pushed digest to this repo, commit and run. Anyone
+      # can check it: gh attestation verify oci://<image>@<digest> --repo BreadchainCoop/sigstack-near
+      - name: Lowercase image name
+        if: github.ref == 'refs/heads/main'
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/attest-build-provenance@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
       # Deploys pin by digest (docker/.phala.env), so surface it where ops can copy it.
       - name: Summary
