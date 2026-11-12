@@ -11,6 +11,7 @@ use signal_bot::entitlement_gate::EntitlementGate;
 use signal_bot::error::AppResult;
 use signal_bot::group_invite_acceptor::{run_invite_acceptor, InvitePolicy, InviteSchedule};
 use signal_bot::handlers_setup::build_handlers;
+use signal_bot::profile::{ensure_profile, Profile, PROFILE_ATTEMPTS, PROFILE_RETRY_DELAY};
 use signal_client::{MessageReceiver, SignalClient};
 use std::sync::Arc;
 use tokio::signal;
@@ -94,6 +95,29 @@ async fn main() -> AppResult<()> {
         None
     };
     let bot_username = claimed_username.unwrap_or(nickname);
+
+    // Display name, about line and picture; in the background so a slow signal-api
+    // doesn't hold up startup.
+    if let (Some(profile), Some(phone)) = (
+        Profile::from_config(&config.bot),
+        config
+            .signal
+            .phone_number
+            .clone()
+            .filter(|p| !p.trim().is_empty()),
+    ) {
+        let signal = signal.clone();
+        tokio::spawn(async move {
+            ensure_profile(
+                &signal,
+                &phone,
+                &profile,
+                PROFILE_ATTEMPTS,
+                PROFILE_RETRY_DELAY,
+            )
+            .await;
+        });
+    }
 
     let bot_identity = BotIdentity::new();
 
