@@ -3,6 +3,7 @@
 mod bot_username;
 #[cfg(test)]
 mod command_aliases;
+mod dm_fallback;
 mod help;
 mod link;
 mod menu_locale;
@@ -18,6 +19,7 @@ mod translate_service;
 mod verify;
 
 pub use bot_username::BotUsernameHandler;
+pub use dm_fallback::DmFallbackHandler;
 pub use help::{CommandsHandler, HelpHandler, InfoHandler};
 pub use link::LinkHandler;
 pub use privacy::PrivacyHandler;

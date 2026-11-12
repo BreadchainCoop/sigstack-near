@@ -237,6 +237,8 @@ pub async fn build_handlers(
     handlers.push(Box::new(HelpHandler::new()));
     handlers.push(Box::new(InfoHandler::new(group_prefs)));
     handlers.push(Box::new(PrivacyHandler::new()));
+    // Last: answers DMs nothing above took, so a first message never meets silence.
+    handlers.push(Box::new(DmFallbackHandler::new(bot_identity)));
 
     info!("Unified bot: hub menus + voice + in-chat + Language Threads");
     Ok(BuiltHandlers {
@@ -337,7 +339,7 @@ mod tests {
         )
         .await
         .expect("handlers with verification");
-        assert_eq!(built.handlers.len(), 24);
+        assert_eq!(built.handlers.len(), 25);
     }
 
     #[tokio::test]
@@ -361,7 +363,7 @@ mod tests {
         .expect("translation handlers");
         let handlers = built.handlers;
 
-        assert_eq!(handlers.len(), 24);
+        assert_eq!(handlers.len(), 25);
         let got = labels(&handlers);
         assert!(got.contains(&"translate_me"));
         assert!(got.contains(&"voice"));
@@ -418,7 +420,7 @@ mod tests {
         .expect("translation handlers");
         let handlers = built.handlers;
 
-        assert_eq!(handlers.len(), 23);
+        assert_eq!(handlers.len(), 24);
         let got = labels(&handlers);
         assert!(!got.contains(&"translate_all"));
         assert!(got.contains(&"translate_me"));
@@ -434,6 +436,8 @@ mod tests {
         assert!(got.contains(&"help_transcription"));
         assert!(got.contains(&"bot_username"));
         assert!(got.contains(&"info"));
+        // Dispatch runs the first match, so the DM fallback must come after everything.
+        assert_eq!(got.last(), Some(&"dm_fallback"));
     }
 
     #[tokio::test]
