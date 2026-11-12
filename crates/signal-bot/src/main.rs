@@ -9,9 +9,7 @@ use signal_bot::dispatch::dispatch_message;
 use signal_bot::ensure_username::ensure_signal_username;
 use signal_bot::entitlement_gate::EntitlementGate;
 use signal_bot::error::AppResult;
-use signal_bot::group_invite_acceptor::{
-    run_invite_acceptor, InvitePolicy, DEFAULT_INVITE_POLL_INTERVAL,
-};
+use signal_bot::group_invite_acceptor::{run_invite_acceptor, InvitePolicy, InviteSchedule};
 use signal_bot::handlers_setup::build_handlers;
 use signal_client::{MessageReceiver, SignalClient};
 use std::sync::Arc;
@@ -135,18 +133,29 @@ async fn main() -> AppResult<()> {
     }
     info!("Registered {} command handlers", handlers.len());
 
+    // The receive loop wakes the invite acceptor on group changes, so it can poll slowly.
+    let group_updates = Arc::new(tokio::sync::Notify::new());
     {
         let policy = InvitePolicy::AcceptAll;
         let signal_invites = signal.clone();
         let phone = config.signal.phone_number.clone();
+        let group_updates = group_updates.clone();
         tokio::spawn(async move {
-            run_invite_acceptor(signal_invites, phone, policy, DEFAULT_INVITE_POLL_INTERVAL).await;
+            run_invite_acceptor(
+                signal_invites,
+                phone,
+                policy,
+                InviteSchedule::default(),
+                group_updates,
+            )
+            .await;
         });
     }
 
     info!("Listening for messages...");
 
-    let receiver = MessageReceiver::new((*signal).clone(), config.signal.poll_interval);
+    let receiver = MessageReceiver::new((*signal).clone(), config.signal.poll_interval)
+        .with_group_updates(group_updates);
     let mut stream = Box::pin(receiver.stream());
 
     loop {
