@@ -1,12 +1,22 @@
 [
   {
+    "compose_hash": "92154d57027fc7038dcead63aef68b23e7c82414e2e8a1217771c50142c054fe",
+    "app_compose": "builds/92154d57027fc7038dcead63aef68b23e7c82414e2e8a1217771c50142c054fe.json",
+    "images_commit": "45f8ad23bd6db576c6c95469f87af2a3ce0ba4cb",
+    "images_run": 43156696083,
+    "compose_commit": "9d9f791e515bc8224d8075c12fb564a8c9e4076c",
+    "pinned_in_pr": 61,
+    "summary": "Current demo build, and the first with GitHub-signed image provenance. Checks for group invites when a group update arrives instead of listing groups every 5 s, which held the Signal account and slowed replies, and logs every verified NEAR AI response.",
+    "provenance": "github"
+  },
+  {
     "compose_hash": "5f0f9eb93ca24ec56a5fe9e6cf4adc10ead8ea4da5d02be893d990c91ee1cd6b",
     "app_compose": "builds/5f0f9eb93ca24ec56a5fe9e6cf4adc10ead8ea4da5d02be893d990c91ee1cd6b.json",
     "images_commit": "9cac0eb20d6b5547dcd0653bd60690e4d8534b75",
     "images_run": 43138135692,
     "compose_commit": "d5755494c7783c0a55eaf33787b8bf70d6e77d86",
     "pinned_in_pr": 54,
-    "summary": "Current demo build. Verifies NEAR AI: each translation must be signed by an attested model GPU TEE (Intel TDX quote, NVIDIA GPUs), and Whisper is re-attested every half hour. !verify reports the agent registration and these model checks."
+    "summary": "Verifies NEAR AI: each translation must be signed by an attested model GPU TEE (Intel TDX quote, NVIDIA GPUs), and Whisper is re-attested every half hour. !verify reports the agent registration and these model checks; replaced by 92154d57."
   },
   {
     "compose_hash": "812dae7d598a7258fc0fafd6caa2fb142b34a8d4268b685910cc64c992142cde",
