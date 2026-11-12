@@ -5,7 +5,7 @@
 //! covers it like the rest of the bot.
 
 use crate::config::BotConfig;
-use signal_client::SignalClient;
+use signal_client::{SignalClient, SignalError};
 use std::time::Duration;
 use tracing::{info, warn};
 
@@ -72,6 +72,11 @@ pub async fn ensure_profile(
                 );
                 return true;
             }
+            // A refused request (e.g. an avatar signal-api won't take) won't heal on retry.
+            Err(e @ SignalError::Rejected { .. }) => {
+                warn!("Signal profile not set: signal-api refused it, not retrying: {e}");
+                return false;
+            }
             Err(e) => {
                 warn!(attempt, attempts, "Setting the Signal profile failed: {e}");
                 if attempt < attempts {
@@ -80,6 +85,7 @@ pub async fn ensure_profile(
             }
         }
     }
+    warn!("Signal profile not set after {attempts} attempts");
     false
 }
 
@@ -153,6 +159,28 @@ mod tests {
         )
         .await;
         assert!(ok);
+    }
+
+    #[tokio::test]
+    async fn ensure_profile_does_not_retry_a_rejected_profile() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/v1/profiles/%2B15550001111"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad avatar"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let signal = SignalClient::new(server.uri()).unwrap();
+        let ok = ensure_profile(
+            &signal,
+            "+15550001111",
+            &profile(),
+            5,
+            Duration::from_millis(1),
+        )
+        .await;
+        assert!(!ok);
     }
 
     #[tokio::test]

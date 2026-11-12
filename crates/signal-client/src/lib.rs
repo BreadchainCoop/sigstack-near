@@ -835,6 +835,25 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Set profile failed: bad avatar"));
+        assert!(matches!(err, SignalError::Rejected { status: 400, .. }));
+    }
+
+    #[tokio::test]
+    async fn test_set_profile_server_error_is_not_rejected() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("PUT"))
+            .and(path("/v1/profiles/%2B15555555555"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("starting"))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let err = client
+            .set_profile("+15555555555", "Sigstack", None, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SignalError::Api(ref m) if m.contains("starting")));
     }
 
     #[test]

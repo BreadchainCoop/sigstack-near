@@ -13,6 +13,10 @@ pub enum SignalError {
     #[error("API error: {0}")]
     Api(String),
 
+    /// signal-api answered 4xx: the request itself was refused, so retrying it won't help.
+    #[error("Rejected ({status}): {message}")]
+    Rejected { status: u16, message: String },
+
     #[error("Not registered")]
     NotRegistered,
 

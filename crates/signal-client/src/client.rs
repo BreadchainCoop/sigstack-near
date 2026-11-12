@@ -667,9 +667,20 @@ impl SignalClient {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let msg = response.text().await.unwrap_or_default();
-            return Err(SignalError::Api(format!("Set profile failed: {msg}")));
+        let status = response.status();
+        if !status.is_success() {
+            let message = format!(
+                "Set profile failed: {}",
+                response.text().await.unwrap_or_default()
+            );
+            return Err(if status.is_client_error() {
+                SignalError::Rejected {
+                    status: status.as_u16(),
+                    message,
+                }
+            } else {
+                SignalError::Api(message)
+            });
         }
         Ok(())
     }
