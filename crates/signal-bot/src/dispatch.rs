@@ -118,6 +118,9 @@ pub async fn dispatch_message(
     entitlements: &EntitlementGate,
 ) -> DispatchOutcome {
     bot_identity.note_inbound(message);
+    for h in handlers {
+        h.observe(message);
+    }
 
     let handler = handlers.iter().find(|h| h.matches(message));
 
@@ -381,6 +384,42 @@ mod tests {
         let outcome =
             dispatch_message(&handlers, &signal, &identity, &dm("hello"), &open_gate()).await;
         assert_eq!(outcome, DispatchOutcome::NoMatch);
+    }
+
+    /// Counts `observe` calls and never matches.
+    struct Observer(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl CommandHandler for Observer {
+        fn matches(&self, _message: &BotMessage) -> bool {
+            false
+        }
+
+        fn observe(&self, _message: &BotMessage) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+
+        async fn execute(&self, _message: &BotMessage) -> AppResult<String> {
+            unreachable!("never matches")
+        }
+    }
+
+    // Every handler sees every message, including ones it doesn't handle and ones no
+    // handler claims.
+    #[tokio::test]
+    async fn every_handler_observes_every_message() {
+        let (_server, signal) = signal_mock().await;
+        let identity = BotIdentity::new();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let handlers: Vec<Box<dyn CommandHandler>> = vec![
+            Box::new(Observer(seen.clone())),
+            Box::new(Observer(seen.clone())),
+        ];
+
+        let outcome =
+            dispatch_message(&handlers, &signal, &identity, &dm("hello"), &open_gate()).await;
+        assert_eq!(outcome, DispatchOutcome::NoMatch);
+        assert_eq!(seen.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

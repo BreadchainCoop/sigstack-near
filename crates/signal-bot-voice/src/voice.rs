@@ -94,6 +94,15 @@ impl VoiceHandler {
 
 #[async_trait]
 impl CommandHandler for VoiceHandler {
+    /// Remembers every voice note, including in chats without auto-transcribe, which is where
+    /// `!transcribe` is used: Signal's quote of a voice note doesn't carry its attachment.
+    fn observe(&self, message: &BotMessage) {
+        if let (Some(cache), Some(audio)) = (&self.voice_cache, message.primary_audio_attachment())
+        {
+            cache.remember(message.reply_target(), message.timestamp, audio.clone());
+        }
+    }
+
     fn matches(&self, message: &BotMessage) -> bool {
         if !message.is_voice_note() {
             return false;
@@ -125,10 +134,6 @@ impl CommandHandler for VoiceHandler {
                 return Ok(String::new());
             }
         };
-
-        if let Some(cache) = &self.voice_cache {
-            cache.remember(message.reply_target(), message.timestamp, audio.clone());
-        }
 
         if let Some(expected) = audio.size {
             if expected > self.max_attachment_bytes as i64 {
@@ -345,7 +350,44 @@ mod tests {
         assert!(handler.handles_own_reply());
         let out = handler.execute(&msg).await.unwrap();
         assert!(out.is_empty());
-        assert!(cache.lookup(msg.reply_target(), msg.timestamp).is_some());
+    }
+
+    #[test]
+    fn observe_remembers_voice_notes_even_with_auto_transcribe_off() {
+        let cache = VoiceAttachmentCache::with_default_capacity();
+        let handler = VoiceHandler::new(
+            test_whisper("http://127.0.0.1:9"),
+            Arc::new(SignalClient::new("http://127.0.0.1:9").unwrap()),
+            DEFAULT_REPLY_PREFIX,
+            10_000,
+        )
+        .with_voice_cache(cache.clone())
+        .with_transcribe_store(Arc::new(TranscribeStore::new(None)));
+
+        let msg = dm_voice(Some(16));
+        assert!(!handler.matches(&msg), "auto-transcribe is off");
+        handler.observe(&msg);
+        let cached = cache.lookup(msg.reply_target(), msg.timestamp).unwrap();
+        assert_eq!(cached.id, "att-1");
+    }
+
+    #[test]
+    fn observe_without_cache_or_audio_is_a_no_op() {
+        let handler = VoiceHandler::new(
+            test_whisper("http://127.0.0.1:9"),
+            Arc::new(SignalClient::new("http://127.0.0.1:9").unwrap()),
+            DEFAULT_REPLY_PREFIX,
+            10_000,
+        );
+        handler.observe(&dm_voice(Some(16)));
+
+        let cache = VoiceAttachmentCache::with_default_capacity();
+        let handler = handler.with_voice_cache(cache.clone());
+        let mut text = dm_voice(Some(16));
+        text.attachments.clear();
+        text.text = "hello".into();
+        handler.observe(&text);
+        assert!(cache.lookup(text.reply_target(), text.timestamp).is_none());
     }
 
     #[tokio::test]

@@ -30,6 +30,11 @@ pub trait CommandHandler: Send + Sync {
         }
     }
 
+    /// Sees every incoming message before dispatch picks a handler, whichever handler (if
+    /// any) then runs it. For bookkeeping a later command needs, such as remembering voice
+    /// notes so `!transcribe` can find the one it replies to. Must be cheap and not block.
+    fn observe(&self, _message: &BotMessage) {}
+
     /// Execute the command.
     async fn execute(&self, message: &BotMessage) -> AppResult<String>;
 
@@ -124,6 +129,7 @@ mod tests {
         assert!(!h.reply_with_quote());
         assert!(!h.handles_own_reply());
         assert!(!h.styled_reply());
+        h.observe(&msg("!help", false));
     }
 
     #[test]
