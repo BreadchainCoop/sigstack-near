@@ -52,7 +52,10 @@ Replies are never blocked or changed. Verification runs after the reply is sent,
 adds no latency. An outage of NEAR AI's signature or attestation endpoints, Intel's
 PCCS, or NVIDIA's NRAS doesn't take the bot down either.
 
-Each failure is logged (`failed verification: …`) and counted per model. The last
+Each verified response is logged at info with its chat ID, the model, the attested
+instance's signing key and compose hash, and the running verified and failed counts. The
+log line contains no message content. Each failure is logged (`failed verification: …`)
+and counted per model. The last
 error is kept with its time, alongside when a response last verified. `!verify` reports
 these, so it can tell a current problem from one that has since cleared. Fetching a
 signature is retried when NEAR AI answers 404 (not propagated yet), 429 or 5xx. The trade-off: a response that fails
