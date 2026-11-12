@@ -379,8 +379,16 @@ impl VerifyHandler {
                 "✅ **Its code** is a build approved on NEAR: it registered as {who}. {}",
                 explorer(&agent.contract_id, "txns", &reg.tx_hash)
             ),
-            (Some(_), _) => format!("⚠️ **Its code:** the registration of {who} has expired."),
-            (None, Some(err)) => format!("⏳ **Its code:** {who} isn't registered yet: {err}"),
+            (Some(_), err) => format!(
+                "⚠️ **Its code:** the registration of {who} has expired.{}",
+                err.as_deref()
+                    .map(|e| format!(" Last refresh failed: {}", brief(e)))
+                    .unwrap_or_default()
+            ),
+            (None, Some(err)) => format!(
+                "⏳ **Its code:** {who} isn't registered yet: {}",
+                brief(err)
+            ),
             (None, None) => format!("⏳ **Its code:** {who} is registering now."),
         })
     }
@@ -443,12 +451,21 @@ impl VerifyHandler {
         if let Some(whisper) = &models.whisper_model {
             let w = find(whisper);
             lines.push(match w.filter(|s| s.instance.is_some()) {
-                Some(s) => format!(
-                    "✅ **Voice** is transcribed by {} in an attested NEAR AI GPU TEE ({}). \
-                     {VOICE_UNSIGNED}",
-                    model_name(whisper),
-                    ago(attested_at(s), now)
-                ),
+                Some(s) => {
+                    // Whisper has no signed responses, so a failed re-attestation is the
+                    // only sign that the serving instance changed to one we can't verify.
+                    let (icon, failure) = if failing_now(s) {
+                        ("⚠️", failure_suffix(Some(s)))
+                    } else {
+                        ("✅", String::new())
+                    };
+                    format!(
+                        "{icon} **Voice** is transcribed by {} in an attested NEAR AI GPU TEE \
+                         ({}). {VOICE_UNSIGNED}{failure}",
+                        model_name(whisper),
+                        ago(attested_at(s), now)
+                    )
+                }
                 None => format!(
                     "⏳ **Voice:** {} hasn't been attested yet.{}",
                     model_name(whisper),
@@ -468,7 +485,7 @@ impl VerifyHandler {
         let names = std::iter::once(&models.chat_model).chain(models.whisper_model.as_ref());
         for model in names {
             let status = statuses.iter().find(|s| &s.model == model);
-            let Some((s, instance)) = status.and_then(|s| Some((s, s.instance.as_ref()?))) else {
+            let Some((s, Some(instance))) = status.map(|s| (s, s.instance.as_ref())) else {
                 lines.push(format!("- `{model}`: not attested yet"));
                 continue;
             };
@@ -524,9 +541,23 @@ fn failing_now(status: &ModelStatus) -> bool {
 
 fn failure_suffix(status: Option<&ModelStatus>) -> String {
     match status.and_then(|s| s.last_failure.as_ref()) {
-        Some(failure) => format!(" Last check failed: {}", failure.error),
+        Some(failure) => format!(" Last check failed: {}", brief(&failure.error)),
         None => String::new(),
     }
+}
+
+/// Longest error text shown in a summary line.
+const MAX_ERROR_CHARS: usize = 200;
+
+/// An error's first line, cut to `MAX_ERROR_CHARS`, so a verbose RPC or attestation
+/// error can't flood the reply.
+fn brief(error: &str) -> String {
+    let line = error.lines().next().unwrap_or_default().trim();
+    if line.chars().count() <= MAX_ERROR_CHARS {
+        return line.to_string();
+    }
+    let cut: String = line.chars().take(MAX_ERROR_CHARS).collect();
+    format!("{}…", cut.trim_end())
 }
 
 /// `deepseek-ai/DeepSeek-V4.1-Flash-1017` → `DeepSeek-V4.1-Flash-1017`.
@@ -1059,7 +1090,14 @@ mod tests {
         ));
 
         let expired = handler.format_response_at(quoted(), at(1_900_000_000));
-        assert!(summary(&expired).contains("agent.sigstack.testnet has expired"));
+        assert!(summary(&expired).contains("agent.sigstack.testnet has expired."));
+        assert!(!summary(&expired).contains("Last refresh failed"));
+
+        // Expired with the refresh still failing says why.
+        status.record(&Err(AgentError::Rpc("timeout\nbacktrace…".into())));
+        let stuck = handler.format_response_at(quoted(), at(1_900_000_000));
+        assert!(summary(&stuck).contains("has expired. Last refresh failed: NEAR RPC: timeout\n"));
+        assert!(!stuck.contains("backtrace"));
     }
 
     #[test]
@@ -1134,6 +1172,35 @@ mod tests {
     }
 
     #[test]
+    fn flags_voice_when_reattestation_is_failing() {
+        let now = at(1_800_000_000);
+        let voice = |failure_at| ModelStatus {
+            model: WHISPER.into(),
+            instance: Some(instance(WHISPER, at(1_799_990_000))),
+            last_failure: Some(Failure {
+                at: at(failure_at),
+                error: "attestation: quote binding: report data doesn't bind this signing key"
+                    .into(),
+            }),
+            ..Default::default()
+        };
+
+        let current =
+            with_statuses(vec![voice(1_799_999_000)], true).format_response_at(quoted(), now);
+        let line = summary(&current)
+            .lines()
+            .find(|l| l.contains("**Voice**"))
+            .unwrap();
+        assert!(line.starts_with("⚠️ **Voice**"), "{line}");
+        assert!(line.contains("Last check failed: attestation: quote binding"));
+
+        let cleared =
+            with_statuses(vec![voice(1_799_980_000)], true).format_response_at(quoted(), now);
+        assert!(summary(&cleared).contains("✅ **Voice**"));
+        assert!(!summary(&cleared).contains("Last check failed"));
+    }
+
+    #[test]
     fn reports_models_not_attested_yet() {
         let now = at(1_800_000_000);
         let chat = ModelStatus {
@@ -1170,6 +1237,29 @@ mod tests {
         let handler = create_test_handler().with_model_verifier(verifier, CHAT, None);
         let response = handler.format_response(quoted());
         assert!(summary(&response).contains("hasn't been attested yet."));
+    }
+
+    #[test]
+    fn errors_are_brief() {
+        assert_eq!(brief("short"), "short");
+        assert_eq!(brief("first line\nsecond"), "first line");
+        assert_eq!(brief(""), "");
+        let long = "x".repeat(MAX_ERROR_CHARS + 50);
+        let cut = brief(&long);
+        assert_eq!(cut.chars().count(), MAX_ERROR_CHARS + 1);
+        assert!(cut.ends_with('…'));
+
+        let status = ModelStatus {
+            model: CHAT.into(),
+            last_failure: Some(Failure {
+                at: at(1),
+                error: long,
+            }),
+            ..Default::default()
+        };
+        let response = with_statuses(vec![status], false).format_response_at(quoted(), at(2));
+        assert!(response.contains(&format!("Last check failed: {cut}")));
+        assert!(!response.contains(&"x".repeat(MAX_ERROR_CHARS + 1)));
     }
 
     #[test]
