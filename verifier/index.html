@@ -123,21 +123,35 @@
       <ul class="checks">
         <li>Each approved compose hash is the sha256 of a published <code>app_compose</code> file.</li>
         <li>That file pins every container image by digest.</li>
+        <li>
+          For this repo's images, what GitHub's signed build provenance says: the commit and workflow run that
+          built each digest.
+        </li>
         <li>The contract's on-chain code is the wasm built by this repo's CI.</li>
+      </ul>
+      <h3>Checked by this repo's CI, on every change to the build archive</h3>
+      <ul class="checks">
+        <li>Each attested compose file is <code>docker/phala-demo.yaml</code> byte for byte, at the commit that pinned it.</li>
+        <li>The images were built from that commit or an earlier one.</li>
+        <li>On ghcr.io, the tag <code>sha-&lt;commit&gt;</code> of each of this repo's images is the pinned digest.</li>
+        <li>Where an image has GitHub provenance, its signature verifies and it names the stated commit.</li>
       </ul>
       <h3>Not verified here</h3>
       <ul class="checks">
         <li>
-          That each image digest was built from the stated commit. The linked <code>images</code> workflow run
-          logs the digest it pushed; rebuilding the image yourself is the stronger check.
+          Provenance signatures. This page shows what the attestation claims; run the
+          <code>gh attestation verify</code> command shown next to an image to check its signature. Builds archived
+          before provenance signing have only the tag check. Rebuilding an image yourself is the strongest check,
+          but the builds aren't bit-for-bit reproducible yet.
         </li>
         <li>
           That the bot you message in Signal is this agent. Send it <code>!verify &lt;random text&gt;</code> and
           compare its compose hash with the one above (see the README).
         </li>
         <li>
-          The AI side. Messages are transcribed and translated by NEAR AI Cloud models running in GPU TEEs, but the
-          bot doesn't verify their attestation yet.
+          The AI side. Messages are transcribed and translated by NEAR AI Cloud models in GPU TEEs. Builds from
+          5f0f9eb9 on check those models' attestation and translation signatures inside the bot, and
+          <code>!verify</code> reports the result; this page can't see that.
         </li>
         <li>
           The firmware and OS measurements (MRTD, RTMR0–2) are Phala's dstack image. They're approved as published,
@@ -299,7 +313,73 @@ async function checkBuild(composeHash, index) {
   return { entry, actual, matches: actual === composeHash, images, appCompose };
 }
 
-function imageNode(ref) {
+// GitHub's provenance attestations for a digest: the commits and runs their signed statements
+// name. The page reads the claims; `gh attestation verify` also checks the Sigstore signature.
+const provenanceCache = new Map();
+function provenance(digest) {
+  if (!provenanceCache.has(digest)) provenanceCache.set(digest, fetchProvenance(digest));
+  return provenanceCache.get(digest);
+}
+async function fetchProvenance(digest) {
+  const res = await fetch(`https://api.github.com/repos/${CONFIG.repo}/attestations/${digest}`, {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  // GitHub answers 404 while the repo has no attestations at all.
+  if (res.status === 404) return { found: false, readable: 0, commits: [], runs: [] };
+  if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
+  const body = await res.json();
+  const commits = new Set();
+  const runs = new Set();
+  let readable = 0;
+  for (const a of body.attestations || []) {
+    // Large bundles come only as a bundle_url; leave those to gh.
+    const payload = a.bundle?.dsseEnvelope?.payload;
+    if (!payload) continue;
+    // atob gives one char per byte; decode the bytes as UTF-8.
+    const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+    const statement = JSON.parse(new TextDecoder().decode(bytes));
+    if (!String(statement.predicateType).startsWith("https://slsa.dev/provenance/")) continue;
+    readable += 1;
+    for (const dep of statement.predicate?.buildDefinition?.resolvedDependencies || []) {
+      if (dep.digest?.gitCommit) commits.add(dep.digest.gitCommit);
+    }
+    const run = String(statement.predicate?.runDetails?.metadata?.invocationId || "").match(/\/actions\/runs\/(\d+)/);
+    if (run) runs.add(run[1]);
+  }
+  return { found: (body.attestations || []).length > 0, readable, commits: [...commits], runs: [...runs] };
+}
+
+function provenanceNode(name, digest, entry) {
+  const node = el("div", { class: "note" }, badge("pending", "Checking provenance…"));
+  const verify = code(`gh attestation verify oci://${name}@${digest} --repo ${CONFIG.repo}`);
+  provenance(digest)
+    .then((p) => {
+      if (!p.found) {
+        node.replaceChildren(
+          badge("warn", "No signed provenance"),
+          ` Built before the images workflow signed provenance. CI checks that the tag sha-${entry.images_commit.slice(0, 7)} on ghcr.io is this digest.`,
+        );
+      } else if (!p.commits.length && !p.readable) {
+        node.replaceChildren(badge("warn", "Provenance found but not readable here"), " To check it: ", verify);
+      } else if (p.commits.length === 1 && p.commits[0] === entry.images_commit) {
+        node.replaceChildren(
+          badge("ok", "GitHub-signed provenance"),
+          " Built from ",
+          commitLink(p.commits[0]),
+          ...p.runs.flatMap((r) => [" in ", runLink(r)]),
+          ". To check its signature: ",
+          verify,
+        );
+      } else {
+        const named = p.commits.map((c) => c.slice(0, 7)).join(", ") || "no commit";
+        node.replaceChildren(badge("bad", `Provenance names ${named}, not ${entry.images_commit.slice(0, 7)}`), " ", verify);
+      }
+    })
+    .catch((e) => node.replaceChildren(badge("warn", `Couldn't check provenance: ${e.message}`), " ", verify));
+  return node;
+}
+
+function imageNode(ref, entry) {
   const at = ref.indexOf("@sha256:");
   const name = at >= 0 ? ref.slice(0, at) : ref;
   const pinned = at >= 0;
@@ -312,6 +392,8 @@ function imageNode(ref) {
     " ",
     pinned ? badge("ok", "pinned by digest") : badge("bad", "not pinned"),
     pinned ? el("div", { class: "mono note" }, ref.slice(at + 1)) : null,
+    pinned && ghcr ? provenanceNode(name.toLowerCase(), ref.slice(at + 1), entry) : null,
+    pinned && !ghcr ? el("div", { class: "note" }, "Third-party image, pinned as published.") : null,
   );
 }
 
@@ -333,11 +415,18 @@ function renderBuild(m, check, agents) {
     card.append(
       el("p", { class: "note" }, check.entry.summary),
       row("Published file", link(`${GH}/blob/main/verifier/${check.entry.app_compose}`, check.entry.app_compose.split("/").pop().slice(0, 12) + "….json")),
+      row(
+        "Compose file",
+        link(`${GH}/blob/${check.entry.compose_commit}/docker/phala-demo.yaml`, "docker/phala-demo.yaml"),
+        " at ",
+        commitLink(check.entry.compose_commit),
+        el("div", { class: "note" }, "CI checks that the attested compose is this file byte for byte."),
+      ),
       row("Images built from", commitLink(check.entry.images_commit), " by the images workflow, ", runLink(check.entry.images_run)),
       row("Pinned in", link(`${GH}/pull/${check.entry.pinned_in_pr}`, `PR #${check.entry.pinned_in_pr}`)),
     );
     if (!check.matches) card.append(row("Published file's sha256", el("span", { class: "mono" }, check.actual)));
-    card.append(el("h3", { style: "margin-top:12px" }, "Container images"), el("ul", { class: "checks" }, check.images.map(imageNode)));
+    card.append(el("h3", { style: "margin-top:12px" }, "Container images"), el("ul", { class: "checks" }, check.images.map((ref) => imageNode(ref, check.entry))));
   }
   card.append(
     row("Registered agents", running.length ? `${running.length} valid` : "none valid right now"),
