@@ -32,10 +32,13 @@ services:
     restart: unless-stopped
 
   signal-bot:
-    image: ghcr.io/breadchaincoop/sigstack-near-bot-tee@sha256:07f1d616668477da68d26dbf8f520024ee5efb9a80e956e12216919847c3ba4f
+    image: ghcr.io/breadchaincoop/sigstack-near-bot-tee@sha256:ea5f14e930856a1d2c76f343d7d16db1c944a0480210b67e4380c9ac95d264d7
     environment:
       - SIGNAL__SERVICE_URL=http://signal-api:8080
       - SIGNAL__PHONE_NUMBER=${SIGNAL_PHONE}
+      # Pause between receive polls (default 200 ms). In native mode each receive holds the
+      # Signal account for ~3 s, so back-to-back polls kept sends and typing calls waiting.
+      - SIGNAL__POLL_INTERVAL=1s
       - NEAR_AI__API_KEY=${NEAR_AI_API_KEY}
       - NEAR_AI__BASE_URL=https://cloud-api.near.ai/v1
       - NEAR_AI__MODEL=deepseek-ai/DeepSeek-V4.1-Flash-1017
