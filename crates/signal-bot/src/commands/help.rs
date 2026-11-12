@@ -172,7 +172,7 @@ mod tests {
         assert!(out.contains("Compact command list"));
         assert!(out.contains("!privacy\n  "));
         assert!(out.contains("TEE"));
-        assert!(!out.contains("!verify <challenge>"));
+        assert!(out.contains("!verify <challenge>\n  Prove this bot"));
     }
 
     #[tokio::test]
