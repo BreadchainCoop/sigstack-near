@@ -85,6 +85,9 @@ def verified_commit(image):
     commits = set()
     for result in json.loads(out.stdout):
         statement = result["verificationResult"]["statement"]
+        # Other attestation kinds (e.g. an SBOM) on the same digest carry no build definition.
+        if not str(statement.get("predicateType", "")).startswith("https://slsa.dev/provenance/"):
+            continue
         for dep in statement["predicate"]["buildDefinition"]["resolvedDependencies"]:
             if "gitCommit" in dep.get("digest", {}):
                 commits.add(dep["digest"]["gitCommit"])
@@ -94,7 +97,7 @@ def verified_commit(image):
 def check_registry(entry, images):
     for image in images:
         if not image.startswith(OWN_IMAGES):
-            notes.append(f"{entry['compose_hash'][:8]}: {image.split('@')[0]} is third-party, pinned only")
+            notes.append(f"{entry['compose_hash']}: {image.split('@')[0]} is third-party, pinned only")
             continue
         name, digest = image.split("@", 1)
         tag = "sha-" + entry["images_commit"]
@@ -127,10 +130,11 @@ def main(argv):
 
     index = json.loads((root / "builds.json").read_text())
     for entry in index:
+        # A missing field fails the build but doesn't skip the file checks; only the git and
+        # registry checks, which need those fields, are skipped.
         missing = [k for k in ("images_commit", "images_run", "compose_commit", "pinned_in_pr", "summary") if k not in entry]
         if missing:
             errors.append(f"{entry['compose_hash']}: missing {', '.join(missing)}")
-            continue
         path = root / entry["app_compose"]
         if not path.is_file():
             errors.append(f"{entry['compose_hash']}: {entry['app_compose']} is missing")
@@ -143,6 +147,8 @@ def main(argv):
         for image in images:
             if "@sha256:" not in image:
                 errors.append(f"{entry['app_compose']}: image {image} isn't pinned by digest")
+        if missing:
+            continue
         if "--git" in argv:
             check_git(entry, compose)
         if "--registry" in argv:

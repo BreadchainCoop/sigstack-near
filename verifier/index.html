@@ -335,7 +335,9 @@ async function fetchProvenance(digest) {
     // Large bundles come only as a bundle_url; leave those to gh.
     const payload = a.bundle?.dsseEnvelope?.payload;
     if (!payload) continue;
-    const statement = JSON.parse(atob(payload));
+    // atob gives one char per byte; decode the bytes as UTF-8.
+    const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+    const statement = JSON.parse(new TextDecoder().decode(bytes));
     if (!String(statement.predicateType).startsWith("https://slsa.dev/provenance/")) continue;
     readable += 1;
     for (const dep of statement.predicate?.buildDefinition?.resolvedDependencies || []) {
