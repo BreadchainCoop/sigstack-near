@@ -93,7 +93,9 @@ impl AgentStatus {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, RegistrationState> {
-        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

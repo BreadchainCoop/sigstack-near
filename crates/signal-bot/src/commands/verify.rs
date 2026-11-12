@@ -992,8 +992,7 @@ mod tests {
         AttestedInstance {
             model: model.into(),
             signing_key: "236f5a6b91dd47dc3b7b36e43d4eb531a042ffb8f8fbf3a1555b78cef4fdda4c".into(),
-            compose_hash: "c53e254e8b70aa14b45ba3043730a0736ca2afb1df7fa3db9c61578845e470fe"
-                .into(),
+            compose_hash: "c53e254e8b70aa14b45ba3043730a0736ca2afb1df7fa3db9c61578845e470fe".into(),
             tcb_status: "UpToDate".into(),
             advisory_ids: vec![],
             gpus: 8,
@@ -1037,7 +1036,9 @@ mod tests {
             "**Agent:** `{AGENT}` https://testnet.nearblocks.io/address/{AGENT}"
         )));
 
-        status.record(&Err(AgentError::TxFailed("wrong expected_measurements".into())));
+        status.record(&Err(AgentError::TxFailed(
+            "wrong expected_measurements".into(),
+        )));
         let failing = handler.format_response_at(quoted(), now);
         assert!(summary(&failing).contains("isn't registered yet: transaction failed"));
 
@@ -1118,14 +1119,14 @@ mod tests {
             last_failure: Some(failure(failure_at)),
         };
 
-        let current = with_statuses(vec![status(1_799_999_900)], false)
-            .format_response_at(quoted(), now);
+        let current =
+            with_statuses(vec![status(1_799_999_900)], false).format_response_at(quoted(), now);
         assert!(summary(&current).contains("⚠️ **Translations**"));
         assert!(summary(&current).contains("9 of 10 replies"));
         assert!(summary(&current).contains("Last check failed: response signature: signed by"));
 
-        let cleared = with_statuses(vec![status(1_799_999_100)], false)
-            .format_response_at(quoted(), now);
+        let cleared =
+            with_statuses(vec![status(1_799_999_100)], false).format_response_at(quoted(), now);
         assert!(summary(&cleared).contains("✅ **Translations**"));
         assert!(!summary(&cleared).contains("Last check failed"));
         // No Whisper line when voice is off.
@@ -1164,9 +1165,8 @@ mod tests {
 
     #[tokio::test]
     async fn reads_a_live_verifier() {
-        let verifier = Arc::new(
-            ModelVerifier::new(VerifierConfig::new("http://127.0.0.1:9"), "key").unwrap(),
-        );
+        let verifier =
+            Arc::new(ModelVerifier::new(VerifierConfig::new("http://127.0.0.1:9"), "key").unwrap());
         let handler = create_test_handler().with_model_verifier(verifier, CHAT, None);
         let response = handler.format_response(quoted());
         assert!(summary(&response).contains("hasn't been attested yet."));

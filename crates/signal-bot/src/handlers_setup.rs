@@ -10,8 +10,8 @@ use crate::transcribe_prefs::GroupTranscribePrefs;
 use crate::transcript_fanout::SuiteTranscriptFanout;
 use anyhow::Context;
 use dstack_client::DstackClient;
-use near_ai_client::verify::{BackgroundVerifier, ModelVerifier, VerifierConfig};
 use near_agent::AgentStatus;
+use near_ai_client::verify::{BackgroundVerifier, ModelVerifier, VerifierConfig};
 use near_ai_client::NearAiClient;
 use signal_bot_voice::{build_voice_handlers, SharedTranscriptFanout};
 use signal_client::SignalClient;
@@ -230,10 +230,7 @@ pub async fn build_handlers(
         )
         .with_agent(agent);
     if let Some(verifier) = model_verifier {
-        let whisper = config
-            .whisper
-            .enabled
-            .then(|| config.whisper.model.clone());
+        let whisper = config.whisper.enabled.then(|| config.whisper.model.clone());
         verify = verify.with_model_verifier(verifier, near_cfg.model.clone(), whisper);
     }
     handlers.push(Box::new(verify));
@@ -360,8 +357,8 @@ mod tests {
             "sigstack.test".into(),
             None,
         )
-            .await
-            .expect("translation handlers");
+        .await
+        .expect("translation handlers");
         let handlers = built.handlers;
 
         assert_eq!(handlers.len(), 24);
@@ -417,8 +414,8 @@ mod tests {
             "sigstack.test".into(),
             None,
         )
-            .await
-            .expect("translation handlers");
+        .await
+        .expect("translation handlers");
         let handlers = built.handlers;
 
         assert_eq!(handlers.len(), 23);
@@ -446,15 +443,15 @@ mod tests {
         let dstack = Arc::new(DstackClient::new(&config.dstack.socket_path));
         let identity = BotIdentity::new();
 
-        let result =
-            build_handlers(
+        let result = build_handlers(
             &config,
             signal,
             dstack,
             identity,
             "sigstack.test".into(),
             None,
-        ).await;
+        )
+        .await;
         assert!(result.is_err(), "missing NEAR AI should fail");
         assert!(
             result.err().unwrap().to_string().contains("NEAR AI"),
