@@ -152,9 +152,9 @@ The deployed code is traceable to this repo:
   `near account view-account-summary agent.sigstack.testnet network-config testnet now`.
 
 The demo bot is registered. At the time of writing, its agent account is
-[`f901a4ed…6409`](https://testnet.nearblocks.io/address/f901a4ed426e431693ab2337c2b1db87923d1d79883e8e92ae6068a67e546409),
+[`9b3eb390…46c2`](https://testnet.nearblocks.io/address/9b3eb39069c75054afcd759337025a5250b0959dfd503f98dd46031ef74946c2),
 registered in
-[`4tcoMTYb…C75m`](https://testnet.nearblocks.io/txns/4tcoMTYbd3Vtf1st9VTWQd8G4ijNL6ADN3N4NMwBC75m),
+[`CP3YQyZp…1pKJ`](https://testnet.nearblocks.io/txns/CP3YQyZpgGPN9ncpRQnMbo3XMNJjXLd7QXjVwRZ81pKJ),
 relayed by the sponsor as a NEP-366 meta-transaction.
 The bot makes a new key on every boot, so after a restart the current one is the newest entry in
 `get_agents`. Registration lasts 7 days, and the bot re-registers before it expires.
@@ -163,7 +163,7 @@ To tie the registered bot to this repo:
 
 1. In `get_agents`, its `measurements.app_compose_hash_payload` is the compose hash the contract
    checked against the TDX quote. For the demo it is
-   `5f0f9eb93ca24ec56a5fe9e6cf4adc10ead8ea4da5d02be893d990c91ee1cd6b`.
+   `92154d57027fc7038dcead63aef68b23e7c82414e2e8a1217771c50142c054fe`.
 2. That hash is the sha256 of
    [`docker/phala-demo.app-compose.json`](docker/phala-demo.app-compose.json), which wraps
    [`docker/phala-demo.yaml`](docker/phala-demo.yaml) unchanged. See
@@ -182,7 +182,7 @@ The bot answers with two messages. The first has:
   quote's report data.
 - **Report data:** the challenge in hex. Check it with
   `printf '%s' 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
-- **Compose hash:** should be `5f0f9eb9…cd6b`, the same as above.
+- **Compose hash:** should be `92154d57…54fe`, the same as above.
 - **How to verify:** the same three checks as here, with links to the verifier page and this repo.
 
 The second message is the TDX quote alone. Long-press it, copy it, and paste it into
