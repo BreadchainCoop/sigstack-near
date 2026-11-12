@@ -1,11 +1,19 @@
 [
   {
+    "compose_hash": "5f0f9eb93ca24ec56a5fe9e6cf4adc10ead8ea4da5d02be893d990c91ee1cd6b",
+    "app_compose": "builds/5f0f9eb93ca24ec56a5fe9e6cf4adc10ead8ea4da5d02be893d990c91ee1cd6b.json",
+    "images_commit": "9cac0eb20d6b5547dcd0653bd60690e4d8534b75",
+    "images_run": 43138135692,
+    "pinned_in_pr": 54,
+    "summary": "Current demo build. Verifies NEAR AI: each translation must be signed by an attested model GPU TEE (Intel TDX quote, NVIDIA GPUs), and Whisper is re-attested every half hour. !verify reports the agent registration and these model checks."
+  },
+  {
     "compose_hash": "812dae7d598a7258fc0fafd6caa2fb142b34a8d4268b685910cc64c992142cde",
     "app_compose": "builds/812dae7d598a7258fc0fafd6caa2fb142b34a8d4268b685910cc64c992142cde.json",
     "images_commit": "2b6647b5d27179baf51b7e48fcfa28d1dd586734",
     "images_run": 43117613180,
     "pinned_in_pr": 47,
-    "summary": "Current demo build. The agent pays for its own transfer when it returns refunded registration deposits, so each boot's account keeps only about 0.003 NEAR."
+    "summary": "The agent pays for its own transfer when it returns refunded registration deposits, so each boot's account keeps only about 0.003 NEAR; replaced by 5f0f9eb9."
   },
   {
     "compose_hash": "0634364c719686c10c774bbfd9ea051303f393a6b36452e5c475104bf8fe5a70",
