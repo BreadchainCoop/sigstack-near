@@ -17,13 +17,31 @@ Built by [Bread Cooperative](https://bread.coop) for **NEAR HACKATHON** (1–14 
 ### What is new for the hackathon
 
 1. **On-chain verification (Shade Agent).** The bot registers its TEE attestation with a NEAR
-   contract that only accepts builds Bread has approved. Anyone can check on NEAR that the bot
+   contract that only accepts builds its owner account has approved. Anyone can check on NEAR that the bot
    runs the published code, and every upgrade leaves a public record.
-2. **Model verification.** The bot verifies NEAR AI Cloud's model attestation and response
-   signatures, so `!verify` covers the whole path: your message, this bot's TEE, and the model's TEE.
+2. **Model verification.** The bot verifies the attestation of NEAR AI Cloud's models (Intel TDX
+   and NVIDIA GPUs), and checks that every translation is signed by an attested model instance.
+   `!verify` reports both, so one reply covers your message, this bot's TEE, and the model's TEE.
+   Details: [docs/model-verification.md](docs/model-verification.md).
 3. **Build provenance anyone can check.** Every approved build is archived with the commit it was
    built from and GitHub-signed provenance for its images. CI re-checks them on every change, and
    the verifier page checks them in your browser.
+
+### Known limits
+
+- **Voice transcripts aren't individually signed.** NEAR AI doesn't sign Whisper responses yet, so
+  the bot can only verify that an attested Whisper instance exists, not that a given transcript
+  came from it. Translations are verified one by one.
+- **NVIDIA's GPU verdict is trusted, not re-checked.** The bot gets it directly from NVIDIA's
+  attestation service over TLS and reads it. It doesn't yet verify the signatures on NVIDIA's
+  tokens.
+- **One key approves builds.** The contract owner, `sigstack.testnet`, approves builds. Each
+  approval is public on-chain, but it isn't a DAO vote yet.
+- **Images aren't reproducible bit for bit.** Each image traces to its commit through
+  GitHub-signed provenance, but rebuilding it yourself won't give the same digest.
+
+More in [docs/model-verification.md](docs/model-verification.md#what-this-does-not-prove) and on the
+[verifier page](https://breadchaincoop.github.io/sigstack-near/#h-scope).
 
 ### Prior work and what is judged
 
