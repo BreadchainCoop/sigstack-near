@@ -65,6 +65,22 @@ pub struct GroupInfo {
     pub group_id: String,
     #[serde(rename = "groupName")]
     pub group_name: Option<String>,
+    /// signal-cli's `type`: `UPDATE` when the message carries a group change (an invite, a member
+    /// added or removed, a rename), `DELIVER` for an ordinary group message.
+    #[serde(rename = "type", default)]
+    pub kind: Option<String>,
+}
+
+impl IncomingMessage {
+    /// True if this envelope carries a group change, such as an invite for this account.
+    pub fn is_group_update(&self) -> bool {
+        self.envelope
+            .data_message
+            .as_ref()
+            .and_then(|d| d.group_info.as_ref())
+            .and_then(|g| g.kind.as_deref())
+            .is_some_and(|k| k.eq_ignore_ascii_case("UPDATE"))
+    }
 }
 
 /// Group from `GET /v1/groups/{number}` — use `id` (not `internal_id`) for `/v2/send`.
@@ -494,6 +510,28 @@ mod tests {
         assert!(!identities_match("uuid-abc", "uuid-xyz"));
     }
 
+    #[test]
+    fn group_update_detected_from_type() {
+        let msg = |group: serde_json::Value| -> IncomingMessage {
+            serde_json::from_value(serde_json::json!({
+                "envelope": {
+                    "source": "+14155551234",
+                    "timestamp": 1,
+                    "dataMessage": { "timestamp": 1, "groupInfo": group }
+                },
+                "account": "+15555555555"
+            }))
+            .unwrap()
+        };
+        let update = msg(serde_json::json!({"groupId": "g", "type": "UPDATE", "revision": 3}));
+        let deliver = msg(serde_json::json!({"groupId": "g", "type": "DELIVER"}));
+        let untyped = msg(serde_json::json!({"groupId": "g"}));
+        assert!(update.is_group_update());
+        assert!(!deliver.is_group_update());
+        assert!(!untyped.is_group_update());
+        assert!(!incoming(None, None).is_group_update());
+    }
+
     fn incoming(
         data_message: Option<DataMessage>,
         edit_message: Option<EditMessage>,
@@ -587,6 +625,7 @@ mod tests {
                     group_info: Some(GroupInfo {
                         group_id: "test-group-id".into(),
                         group_name: Some("Main".into()),
+                        kind: None,
                     }),
                     attachments: vec![],
                     quote: Some(Quote {

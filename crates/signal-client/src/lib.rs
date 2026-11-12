@@ -214,6 +214,7 @@ mod tests {
                     group_info: Some(GroupInfo {
                         group_id: "test-group-id".into(),
                         group_name: None,
+                        kind: None,
                     }),
                     attachments: vec![],
                     quote: None,

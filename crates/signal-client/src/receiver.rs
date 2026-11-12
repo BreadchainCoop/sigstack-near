@@ -2,7 +2,9 @@
 
 use crate::client::SignalClient;
 use crate::types::*;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Notify;
 use tokio::time::sleep;
 use tokio_stream::Stream;
 use tracing::{debug, error, info, warn};
@@ -13,6 +15,8 @@ pub struct MessageReceiver {
     poll_interval: Duration,
     /// How often to refresh the account list
     account_refresh_interval: Duration,
+    /// Notified when a received envelope carries a group change (see `with_group_updates`).
+    group_updates: Option<Arc<Notify>>,
 }
 
 impl MessageReceiver {
@@ -31,7 +35,15 @@ impl MessageReceiver {
             client,
             poll_interval,
             account_refresh_interval,
+            group_updates: None,
         }
+    }
+
+    /// Notify `notify` whenever a received envelope carries a group change, such as an
+    /// invite. Lets a pending-invite check run right away instead of on a short poll.
+    pub fn with_group_updates(mut self, notify: Arc<Notify>) -> Self {
+        self.group_updates = Some(notify);
+        self
     }
 
     /// Start receiving messages from all registered accounts as an async stream.
@@ -76,6 +88,12 @@ impl MessageReceiver {
                     match self.client.receive(account).await {
                         Ok(messages) => {
                             for msg in messages {
+                                if msg.is_group_update() {
+                                    if let Some(notify) = &self.group_updates {
+                                        debug!("Group update on {}; checking invites", account);
+                                        notify.notify_one();
+                                    }
+                                }
                                 if let Some(bot_msg) = BotMessage::from_incoming(&msg) {
                                     if bot_msg.is_voice_note() {
                                         if let Some(audio) = bot_msg.primary_audio_attachment() {
@@ -254,5 +272,46 @@ mod tests {
             .unwrap();
         assert!(msg.is_voice_note());
         assert_eq!(msg.primary_audio_attachment().unwrap().id, "voice-1");
+    }
+
+    #[tokio::test]
+    async fn group_update_notifies_and_yields_nothing() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/accounts"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!(["+15550001111"])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/receive/%2B15550001111"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+                "envelope": {
+                    "source": "+15550002222",
+                    "timestamp": 4000,
+                    "dataMessage": {
+                        "timestamp": 4000,
+                        "groupInfo": { "groupId": "internal==", "type": "UPDATE", "revision": 1 }
+                    }
+                },
+                "account": "+15550001111"
+            }])))
+            .mount(&server)
+            .await;
+
+        let notify = Arc::new(Notify::new());
+        let client = SignalClient::new(server.uri()).unwrap();
+        let receiver = MessageReceiver::with_intervals(
+            client,
+            Duration::from_millis(50),
+            Duration::from_secs(60),
+        )
+        .with_group_updates(notify.clone());
+        let mut stream = Box::pin(receiver.stream());
+
+        tokio::select! {
+            _ = notify.notified() => {}
+            msg = stream.next() => panic!("group update yielded a message: {msg:?}"),
+            _ = tokio::time::sleep(Duration::from_secs(2)) => panic!("not notified"),
+        }
     }
 }

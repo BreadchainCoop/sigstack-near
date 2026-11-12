@@ -1,14 +1,20 @@
 //! Auto-accept pending Signal group invites.
 //!
 //! Unified bot: accept any pending invite/request (`AcceptAll`).
+//!
+//! Listing groups holds the Signal account in signal-cli, so sends, typing indicators and
+//! receives wait behind it. The acceptor therefore scans when the receive loop sees a group
+//! change (an invite arrives as one) and otherwise only on a slow fallback poll.
 
 use signal_client::{Group, SignalClient};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
-/// How often to scan `GET /v1/groups` for pending invites.
-pub const DEFAULT_INVITE_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// Fallback interval for scanning `GET /v1/groups` for pending invites, for invites the
+/// receive loop didn't flag as group updates.
+pub const DEFAULT_INVITE_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Policy for which pending invites to accept.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,12 +86,14 @@ pub async fn resolve_account_phone(
     }
 }
 
-/// Background loop: periodically accept pending invites per policy.
+/// Background loop: accept pending invites per policy, each time `group_updates` is notified
+/// and at least every `poll_interval`.
 pub async fn run_invite_acceptor(
     signal: Arc<SignalClient>,
     phone_number: Option<String>,
     policy: InvitePolicy,
     poll_interval: Duration,
+    group_updates: Arc<Notify>,
 ) {
     info!(
         ?policy,
@@ -101,7 +109,10 @@ pub async fn run_invite_acceptor(
         } else {
             warn!("No Signal account available for invite accept; retrying");
         }
-        tokio::time::sleep(poll_interval).await;
+        tokio::select! {
+            _ = tokio::time::sleep(poll_interval) => {}
+            _ = group_updates.notified() => debug!("Group update received; checking invites"),
+        }
     }
 }
 
@@ -168,5 +179,68 @@ mod tests {
         let signal = SignalClient::new(server.uri()).unwrap();
         let n = accept_pending_invites(&signal, "+15550002222", &InvitePolicy::AcceptAll).await;
         assert_eq!(n, 1);
+    }
+
+    async fn list_calls(server: &MockServer) -> usize {
+        server.received_requests().await.unwrap_or_default().len()
+    }
+
+    async fn wait_for_calls(server: &MockServer, n: usize) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while list_calls(server).await < n {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("expected {n} group listings"));
+    }
+
+    #[tokio::test]
+    async fn acceptor_scans_on_group_update_not_only_on_poll() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/groups/%2B15550002222"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+
+        let notify = Arc::new(Notify::new());
+        let signal = Arc::new(SignalClient::new(server.uri()).unwrap());
+        let task = tokio::spawn(run_invite_acceptor(
+            signal,
+            Some("+15550002222".into()),
+            InvitePolicy::AcceptAll,
+            Duration::from_secs(3600),
+            notify.clone(),
+        ));
+
+        wait_for_calls(&server, 1).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(list_calls(&server).await, 1, "no scan before the hour-long poll");
+
+        notify.notify_one();
+        wait_for_calls(&server, 2).await;
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn acceptor_falls_back_to_polling() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/groups/%2B15550002222"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+
+        let signal = Arc::new(SignalClient::new(server.uri()).unwrap());
+        let task = tokio::spawn(run_invite_acceptor(
+            signal,
+            Some("+15550002222".into()),
+            InvitePolicy::AcceptAll,
+            Duration::from_millis(20),
+            Arc::new(Notify::new()),
+        ));
+        wait_for_calls(&server, 3).await;
+        task.abort();
     }
 }
