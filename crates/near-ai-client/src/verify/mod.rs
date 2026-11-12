@@ -889,7 +889,6 @@ pub(crate) mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("signature unavailable"), "{err}");
-
     }
 
     #[tokio::test]
