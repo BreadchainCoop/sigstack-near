@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// How many fresh reports to fetch looking for a response's signer: NEAR AI
 /// load-balances, so each report may describe a different instance.
@@ -407,10 +407,7 @@ impl ModelVerifier {
             Ok(instance) => {
                 status.verified_responses += 1;
                 status.last_verified_at = Some(now);
-                debug!(
-                    "Response {} verified: signed by attested {} instance {}",
-                    exchange.chat_id, exchange.model, instance.signing_key
-                );
+                info!("{}", verified_line(&exchange, &instance, status));
             }
             Err(e) => {
                 status.failed_responses += 1;
@@ -441,6 +438,21 @@ impl ModelVerifier {
 /// Signing keys as hex without `0x`, lowercase, wherever they're compared.
 fn normalize_key(key: &str) -> String {
     key.trim_start_matches("0x").to_ascii_lowercase()
+}
+
+/// The info line for a verified response, so the logs show each check passing rather than only
+/// the absence of failures. IDs, model, key and counts only; never message content.
+fn verified_line(
+    exchange: &ChatExchange,
+    instance: &AttestedInstance,
+    status: &ModelStatus,
+) -> String {
+    let (verified, failed) = (status.verified_responses, status.failed_responses);
+    format!(
+        "Response {} verified: signed by attested {} instance {} (compose {}); \
+         {verified} verified, {failed} failed so far",
+        exchange.chat_id, exchange.model, instance.signing_key, instance.compose_hash
+    )
 }
 
 fn model_entry<'a>(state: &'a mut State, model: &str) -> &'a mut ModelStatus {
@@ -643,6 +655,37 @@ pub(crate) mod tests {
 
     fn signature_json() -> Value {
         fixture()["chat"]["signature"].clone()
+    }
+
+    #[test]
+    fn verified_line_names_ids_and_counts_without_content() {
+        let exchange = ChatExchange {
+            chat_id: "chatcmpl-1".into(),
+            model: "m/Model".into(),
+            request: b"secret request".to_vec(),
+            response: b"secret response".to_vec(),
+        };
+        let instance = AttestedInstance {
+            model: "m/Model".into(),
+            signing_key: "ab12".into(),
+            compose_hash: "c0ffee".into(),
+            tcb_status: "UpToDate".into(),
+            advisory_ids: vec![],
+            gpus: 8,
+            verified_at: SystemTime::UNIX_EPOCH,
+        };
+        let status = ModelStatus {
+            verified_responses: 3,
+            failed_responses: 1,
+            ..ModelStatus::default()
+        };
+        let line = verified_line(&exchange, &instance, &status);
+        assert_eq!(
+            line,
+            "Response chatcmpl-1 verified: signed by attested m/Model instance ab12 \
+             (compose c0ffee); 3 verified, 1 failed so far"
+        );
+        assert!(!line.contains("secret"));
     }
 
     #[tokio::test]
