@@ -924,7 +924,13 @@ mod tests {
         assert!(response.contains("**Compose hash:** `abc123`"));
         // The summary still names the agent; the page has its details.
         assert!(summary(&response).contains("agent `60b051d8…a661`"));
-        for gone in ["How to verify", "xxd -p", "**Agent:**", "proof.t16z", "4. **Models:**"] {
+        for gone in [
+            "How to verify",
+            "xxd -p",
+            "**Agent:**",
+            "proof.t16z",
+            "4. **Models:**",
+        ] {
             assert!(!response.contains(gone), "{gone} should be on the page now");
         }
 
