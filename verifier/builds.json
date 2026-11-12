@@ -1,12 +1,22 @@
 [
   {
+    "compose_hash": "1c58c2e759bebc4f91a384cc1dd6cca4cb97dca1d3eecfb84bd910b79c5a8993",
+    "app_compose": "builds/1c58c2e759bebc4f91a384cc1dd6cca4cb97dca1d3eecfb84bd910b79c5a8993.json",
+    "images_commit": "8c19dd0a37f3f355aaa693b30cef45fc14c6916a",
+    "images_run": 43261137238,
+    "compose_commit": "d4125a138043e00337b9178e5f940925d5746fa0",
+    "pinned_in_pr": 65,
+    "summary": "Current demo build. !transcribe works as a reply to any voice note, including in chats without auto-transcribe, and the bot pauses 1 s between Signal receive polls so sends and typing calls get the account sooner.",
+    "provenance": "github"
+  },
+  {
     "compose_hash": "92154d57027fc7038dcead63aef68b23e7c82414e2e8a1217771c50142c054fe",
     "app_compose": "builds/92154d57027fc7038dcead63aef68b23e7c82414e2e8a1217771c50142c054fe.json",
     "images_commit": "45f8ad23bd6db576c6c95469f87af2a3ce0ba4cb",
     "images_run": 43156696083,
     "compose_commit": "9d9f791e515bc8224d8075c12fb564a8c9e4076c",
     "pinned_in_pr": 61,
-    "summary": "Current demo build, and the first with GitHub-signed image provenance. Checks for group invites when a group update arrives instead of listing groups every 5 s, which held the Signal account and slowed replies, and logs every verified NEAR AI response.",
+    "summary": "The first build with GitHub-signed image provenance. Checks for group invites when a group update arrives instead of listing groups every 5 s, and logs every verified NEAR AI response; replaced by 1c58c2e7.",
     "provenance": "github"
   },
   {
