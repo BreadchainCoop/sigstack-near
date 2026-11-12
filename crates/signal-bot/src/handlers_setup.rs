@@ -55,11 +55,13 @@ pub async fn build_handlers(
             ModelVerifier::new(VerifierConfig::new(&near_cfg.base_url), &near_cfg.api_key)
                 .context("Failed to create NEAR AI verifier")?,
         );
-        // Attest both models up front; chat responses are then checked as they arrive.
-        for model in [near_cfg.model.clone(), config.whisper.model.clone()] {
-            let verifier = verifier.clone();
-            tokio::spawn(async move { verifier.attest(&model).await });
+        // Attest the models now and every half hour, so Whisper (whose transcripts
+        // aren't signed) stays attested too; chat responses are checked as they arrive.
+        let mut models = vec![near_cfg.model.clone()];
+        if config.whisper.enabled && config.whisper.model != near_cfg.model {
+            models.push(config.whisper.model.clone());
         }
+        verifier.spawn_refresh(models);
         info!("Verifying NEAR AI responses and model attestations");
         near_ai = near_ai
             .with_no_aliasing(true)

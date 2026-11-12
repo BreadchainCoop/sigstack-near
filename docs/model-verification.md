@@ -17,11 +17,22 @@ side as well. The code is in `crates/near-ai-client/src/verify/`.
    The hashes are taken over the exact bytes the bot sent and received.
 4. Checks that the signing key belongs to an attested instance of that model (below).
    An attestation is trusted for an hour. When a signer isn't known yet, the bot fetches
-   up to four fresh reports, because NEAR AI load-balances across instances.
+   up to four fresh reports, because NEAR AI load-balances across instances. An outage on
+   one attempt (NEAR AI, PCCS or NRAS erroring) moves on to the next. A report that fails
+   verification stops the check.
+
+Only `chat` on the NEAR AI client reports responses for checking. That covers both
+translation paths. `chat_with_tools` and `chat_stream` aren't verified, and log a
+warning if used while verification is on.
+
+**Each model, every half hour.** The chat model and Whisper are re-attested on a timer,
+starting at boot. This keeps their status current even when no responses arrive, which
+is always the case for Whisper.
 
 **Each model instance.** `GET /v1/attestation/report` is called with a fresh random
 32-byte nonce. Then:
 
+- **Signing key:** compared as lowercase hex without `0x`, however the report writes it.
 - **TDX quote:** verified against Intel's root of trust with `dcap-qvl`. This is the same
   library and version the agent contract uses. Collateral comes from Phala's PCCS, with
   Intel PCS as fallback. Revoked platforms and debug TDs are rejected. Intel's TCB status
@@ -41,8 +52,10 @@ Replies are never blocked or changed. Verification runs after the reply is sent,
 adds no latency. An outage of NEAR AI's signature or attestation endpoints, Intel's
 PCCS, or NVIDIA's NRAS doesn't take the bot down either.
 
-Each failure is logged (`failed verification: …`) and counted per model, with the last
-error kept. `!verify` reports these counts. The trade-off: a response that fails
+Each failure is logged (`failed verification: …`) and counted per model. The last
+error is kept with its time, alongside when a response last verified. `!verify` reports
+these, so it can tell a current problem from one that has since cleared. Fetching a
+signature is retried when NEAR AI answers 404 (not propagated yet), 429 or 5xx. The trade-off: a response that fails
 verification has already been delivered. What the bot can say afterwards is how many
 responses verified and how many didn't.
 

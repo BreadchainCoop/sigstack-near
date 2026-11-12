@@ -31,7 +31,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use secrecy::{ExposeSecret, SecretString};
 use signature::ResponseSignature;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -60,6 +60,17 @@ pub enum VerifyError {
     Gpu(String),
     #[error("response signature: {0}")]
     Signature(String),
+}
+
+impl VerifyError {
+    /// Failures of the infrastructure around a check (NEAR AI, PCCS or NRAS being
+    /// unreachable or erroring) rather than of what it checked. Worth retrying.
+    fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            Self::Http(_) | Self::Fetch(_) | Self::Collateral(_) | Self::Gpu(_)
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +117,13 @@ pub struct AttestedInstance {
     pub verified_at: SystemTime,
 }
 
+/// A failed attestation or response check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub at: SystemTime,
+    pub error: String,
+}
+
 /// What `!verify` can report about one model.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelStatus {
@@ -114,8 +132,11 @@ pub struct ModelStatus {
     pub instance: Option<AttestedInstance>,
     pub verified_responses: u64,
     pub failed_responses: u64,
-    /// The last attestation or response failure.
-    pub last_failure: Option<String>,
+    /// When a response last verified.
+    pub last_verified_at: Option<SystemTime>,
+    /// The last attestation or response failure. Compare its time with
+    /// `last_verified_at` and `instance.verified_at` to tell whether it's still current.
+    pub last_failure: Option<Failure>,
 }
 
 #[derive(Default)]
@@ -165,7 +186,8 @@ impl ModelVerifier {
     /// instance it describes. Failures are recorded for `status`.
     pub async fn attest(&self, model: &str) -> Result<AttestedInstance, VerifyError> {
         let result = self.fetch_and_verify(model).await;
-        let mut state = self.state.lock().unwrap();
+        let now = (self.clock)();
+        let mut state = self.state();
         let status = model_entry(&mut state, model);
         match &result {
             Ok(instance) => {
@@ -179,7 +201,10 @@ impl ModelVerifier {
                 );
             }
             Err(e) => {
-                status.last_failure = Some(format!("attestation: {e}"));
+                status.last_failure = Some(Failure {
+                    at: now,
+                    error: format!("attestation: {e}"),
+                });
                 warn!("Attestation of {model} failed: {e}");
             }
         }
@@ -257,7 +282,7 @@ impl ModelVerifier {
 
         Ok(AttestedInstance {
             model: attestation.model_name.clone(),
-            signing_key: attestation.signing_address.to_lowercase(),
+            signing_key: normalize_key(&attestation.signing_address),
             compose_hash,
             tcb_status: facts.status,
             advisory_ids: facts.advisory_ids,
@@ -274,21 +299,48 @@ impl ModelVerifier {
     ) -> Result<AttestedInstance, VerifyError> {
         let sig = self.fetch_signature(exchange).await?;
         signature::check_signature(&sig, exchange)?;
-        let key = sig.signing_address.to_lowercase();
+        let key = normalize_key(&sig.signing_address);
         if let Some(instance) = self.fresh_instance(&key, &exchange.model) {
             return Ok(instance);
         }
         let _one_at_a_time = self.attesting.lock().await;
+        let mut transient = None;
         for _ in 0..ATTEST_ATTEMPTS {
             if let Some(instance) = self.fresh_instance(&key, &exchange.model) {
                 return Ok(instance);
             }
-            self.attest(&exchange.model).await?;
+            match self.attest(&exchange.model).await {
+                Ok(_) => {}
+                // An outage on one attempt shouldn't use up the rest.
+                Err(e) if e.is_transient() => transient = Some(e),
+                // A report that fails verification is a finding, not a hiccup.
+                Err(e) => return Err(e),
+            }
         }
         self.fresh_instance(&key, &exchange.model).ok_or_else(|| {
-            VerifyError::Signature(format!(
-                "signer {key} wasn't in {ATTEST_ATTEMPTS} fresh attestation reports"
-            ))
+            transient.unwrap_or_else(|| {
+                VerifyError::Signature(format!(
+                    "signer {key} wasn't in {ATTEST_ATTEMPTS} fresh attestation reports"
+                ))
+            })
+        })
+    }
+
+    /// Re-attests `models` every half TTL, starting now. Keeps each model's status
+    /// current even when no responses arrive to prompt it: Whisper never has any.
+    pub fn spawn_refresh(self: &Arc<Self>, models: Vec<String>) -> tokio::task::JoinHandle<()> {
+        let verifier = self.clone();
+        let period = (self.config.attestation_ttl / 2).max(Duration::from_millis(1));
+        tokio::spawn(async move {
+            let mut ticks = tokio::time::interval(period);
+            loop {
+                ticks.tick().await;
+                for model in &models {
+                    let _one_at_a_time = verifier.attesting.lock().await;
+                    // Failures are recorded and logged by attest.
+                    let _ = verifier.attest(model).await;
+                }
+            }
         })
     }
 
@@ -322,7 +374,11 @@ impl ModelVerifier {
                     .map_err(|_| VerifyError::Fetch(format!("signature unavailable: {body}")));
             }
             last = format!("signature: HTTP {status}");
-            if status != reqwest::StatusCode::NOT_FOUND {
+            // Not there yet (404), throttled, or a server error: worth another try.
+            let retry = status == reqwest::StatusCode::NOT_FOUND
+                || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                || status.is_server_error();
+            if !retry {
                 break;
             }
         }
@@ -331,8 +387,7 @@ impl ModelVerifier {
 
     fn fresh_instance(&self, key: &str, model: &str) -> Option<AttestedInstance> {
         let now = (self.clock)();
-        let state = self.state.lock().unwrap();
-        state
+        self.state()
             .instances
             .get(key)
             .filter(|i| i.model == model)
@@ -345,11 +400,13 @@ impl ModelVerifier {
     /// Verifies `exchange` and records the outcome for `status`.
     pub async fn check(&self, exchange: ChatExchange) {
         let result = self.verify_exchange(&exchange).await;
-        let mut state = self.state.lock().unwrap();
+        let now = (self.clock)();
+        let mut state = self.state();
         let status = model_entry(&mut state, &exchange.model);
         match result {
             Ok(instance) => {
                 status.verified_responses += 1;
+                status.last_verified_at = Some(now);
                 debug!(
                     "Response {} verified: signed by attested {} instance {}",
                     exchange.chat_id, exchange.model, instance.signing_key
@@ -357,7 +414,10 @@ impl ModelVerifier {
             }
             Err(e) => {
                 status.failed_responses += 1;
-                status.last_failure = Some(e.to_string());
+                status.last_failure = Some(Failure {
+                    at: now,
+                    error: e.to_string(),
+                });
                 warn!(
                     "Response {} from {} failed verification: {e}",
                     exchange.chat_id, exchange.model
@@ -368,14 +428,19 @@ impl ModelVerifier {
 
     /// Per-model results so far, by model name.
     pub fn status(&self) -> Vec<ModelStatus> {
-        self.state
-            .lock()
-            .unwrap()
-            .models
-            .values()
-            .cloned()
-            .collect()
+        self.state().models.values().cloned().collect()
     }
+
+    /// The state stays usable even if a task panicked while holding it: each update
+    /// is a few field writes, so there's no half-done invariant to protect.
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Signing keys as hex without `0x`, lowercase, wherever they're compared.
+fn normalize_key(key: &str) -> String {
+    key.trim_start_matches("0x").to_ascii_lowercase()
 }
 
 fn model_entry<'a>(state: &'a mut State, model: &str) -> &'a mut ModelStatus {
@@ -598,6 +663,7 @@ pub(crate) mod tests {
         assert_eq!(s.model, exchange.model);
         assert_eq!((s.verified_responses, s.failed_responses), (2, 0));
         assert_eq!(s.last_failure, None);
+        assert_eq!(s.last_verified_at, Some(fetched_at()));
         let instance = s.instance.as_ref().unwrap();
         assert_eq!(instance.signing_key, fixture_signature().signing_address);
         assert_eq!(
@@ -618,7 +684,7 @@ pub(crate) mod tests {
         verifier.config.attestation_ttl = Duration::ZERO;
         verifier.check(fixture_exchange()).await;
         assert_eq!(verifier.status()[0].failed_responses, 1);
-        let err = verifier.status()[0].last_failure.clone().unwrap();
+        let err = verifier.status()[0].last_failure.clone().unwrap().error;
         assert!(err.contains("wasn't in 4"), "{err}");
     }
 
@@ -657,30 +723,161 @@ pub(crate) mod tests {
         verifier.check(fixture_exchange()).await;
         let s = &verifier.status()[0];
         assert_eq!((s.verified_responses, s.failed_responses), (0, 1));
-        assert!(s.last_failure.as_ref().unwrap().contains("gateway"));
+        assert!(s.last_failure.as_ref().unwrap().error.contains("gateway"));
         assert_eq!(s.instance, None);
     }
 
     #[tokio::test]
     async fn retries_missing_signatures_then_gives_up() {
-        let server = MockServer::start().await;
+        for (status, attempts, msg) in [
+            (404, SIGNATURE_ATTEMPTS, "404 Not Found"),
+            (429, SIGNATURE_ATTEMPTS, "429 Too Many Requests"),
+            (503, SIGNATURE_ATTEMPTS, "503 Service Unavailable"),
+            (401, 1, "401 Unauthorized"),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(status))
+                .expect(attempts as u64)
+                .mount(&server)
+                .await;
+            let err = Mocks { server }
+                .verifier()
+                .verify_exchange(&fixture_exchange())
+                .await
+                .unwrap_err()
+                .to_string();
+            assert_eq!(err, format!("signature: HTTP {msg}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn rides_out_a_transient_attestation_failure() {
+        let mocks = Mocks::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(404))
-            .expect(SIGNATURE_ATTEMPTS as u64)
-            .mount(&server)
+            .and(path("/v1/attestation/report"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&mocks.server)
             .await;
-        let mocks = Mocks { server };
+        mocks.report(report_json(), 1).await;
+        mocks.signature(signature_json()).await;
+        let instance = mocks
+            .verifier()
+            .verify_exchange(&fixture_exchange())
+            .await
+            .unwrap();
+        assert_eq!(instance.gpus, 8);
+    }
+
+    #[tokio::test]
+    async fn reports_the_outage_when_every_attempt_fails() {
+        let mocks = Mocks::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/attestation/report"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(ATTEST_ATTEMPTS as u64)
+            .mount(&mocks.server)
+            .await;
+        mocks.signature(signature_json()).await;
         let err = mocks
             .verifier()
             .verify_exchange(&fixture_exchange())
             .await
             .unwrap_err()
             .to_string();
-        assert_eq!(err, "signature: HTTP 404 Not Found");
+        assert_eq!(err, "attestation report: HTTP 503 Service Unavailable");
     }
 
     #[tokio::test]
-    async fn reports_unavailable_signatures_and_server_errors() {
+    async fn stops_at_a_report_that_fails_verification() {
+        let mocks = Mocks::start().await;
+        let mut wrong_nonce = report_json();
+        wrong_nonce["model_attestations"][0]["request_nonce"] = "00".repeat(32).into();
+        mocks.report(wrong_nonce, 1).await;
+        mocks.signature(signature_json()).await;
+        let err = mocks
+            .verifier()
+            .verify_exchange(&fixture_exchange())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("isn't for our nonce"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn matches_signers_however_the_report_writes_the_key() {
+        let mocks = Mocks::start().await;
+        let mut prefixed = report_json();
+        let key = fixture_signature().signing_address;
+        prefixed["model_attestations"][0]["signing_address"] =
+            format!("0x{}", key.to_uppercase()).into();
+        mocks.report(prefixed, 1).await;
+        mocks.signature(signature_json()).await;
+        let instance = mocks
+            .verifier()
+            .verify_exchange(&fixture_exchange())
+            .await
+            .unwrap();
+        assert_eq!(instance.signing_key, key);
+        assert_eq!(normalize_key("0xABcd"), "abcd");
+    }
+
+    #[tokio::test]
+    async fn refresh_reattests_each_model_periodically() {
+        let mocks = Mocks::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/attestation/report"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(report_json()))
+            .mount(&mocks.server)
+            .await;
+        let mut verifier = mocks.verifier();
+        verifier.config.attestation_ttl = Duration::from_millis(100);
+        let verifier = Arc::new(verifier);
+        let model = fixture_exchange().model;
+        let refresh = verifier.spawn_refresh(vec![model.clone(), "other".into()]);
+
+        let reports = || async {
+            mocks
+                .server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .filter(|r| r.url.path() == "/v1/attestation/report")
+                .count()
+        };
+        for _ in 0..200 {
+            if reports().await >= 4 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        refresh.abort();
+        assert!(reports().await >= 4, "only {} reports", reports().await);
+        let status = verifier.status();
+        assert!(status[0].instance.is_some(), "{status:?}");
+        // "other" has no attestation in the report; its failure is recorded.
+        assert_eq!(status[1].model, "other");
+        assert!(status[1].last_failure.is_some());
+    }
+
+    #[test]
+    fn state_survives_a_panic_while_locked() {
+        let verifier = Arc::new(ModelVerifier::new(VerifierConfig::new("http://x"), "k").unwrap());
+        let poisoner = verifier.clone();
+        let _ = std::thread::spawn(move || {
+            let _held = poisoner.state.lock().unwrap();
+            panic!("poison the state");
+        })
+        .join();
+        assert!(verifier.state.is_poisoned());
+        assert!(verifier.status().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reports_unavailable_signatures() {
         let mocks = Mocks::start().await;
         mocks
             .signature(json!({"error_code": "x", "message": "not ready"}))
@@ -693,19 +890,6 @@ pub(crate) mod tests {
             .to_string();
         assert!(err.contains("signature unavailable"), "{err}");
 
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(500))
-            .expect(1)
-            .mount(&server)
-            .await;
-        let err = Mocks { server }
-            .verifier()
-            .verify_exchange(&fixture_exchange())
-            .await
-            .unwrap_err()
-            .to_string();
-        assert_eq!(err, "signature: HTTP 500 Internal Server Error");
     }
 
     #[tokio::test]
@@ -740,7 +924,9 @@ pub(crate) mod tests {
             let err = verifier.attest(&model).await.unwrap_err().to_string();
             assert!(err.contains(msg), "{err} should mention {msg}");
             let s = &verifier.status()[0];
-            assert!(s.last_failure.as_ref().unwrap().contains(msg));
+            let failure = s.last_failure.as_ref().unwrap();
+            assert!(failure.error.contains(msg));
+            assert_eq!(failure.at, fetched_at());
         }
     }
 

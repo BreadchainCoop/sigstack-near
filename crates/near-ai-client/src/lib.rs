@@ -370,6 +370,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unverified_paths_still_work_with_an_observer() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "c", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}}]
+            })))
+            .mount(&mock_server)
+            .await;
+        let recorder = std::sync::Arc::new(Recorder(Default::default()));
+        let client = create_test_client(&mock_server)
+            .await
+            .with_observer(recorder.clone());
+        let reply = client
+            .chat_with_tools(vec![Message::user("hi")], None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(reply.content.as_deref(), Some("ok"));
+        assert!(client
+            .chat_stream(vec![Message::user("hi")], None, None)
+            .await
+            .is_ok());
+        assert!(recorder.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn chat_sends_no_aliasing_header_only_when_asked() {
         let mock_server = MockServer::start().await;
         Mock::given(header_exists("x-no-aliasing"))

@@ -184,6 +184,8 @@ impl NearAiClient {
     }
 
     /// Send a chat completion request with tool support.
+    ///
+    /// Not reported to the observer, so these responses aren't verified.
     #[instrument(skip(self, messages, tools), fields(message_count = messages.len()))]
     pub async fn chat_with_tools(
         &self,
@@ -192,6 +194,7 @@ impl NearAiClient {
         max_tokens: Option<u32>,
         tools: Option<&[ToolDefinition]>,
     ) -> Result<ChatResponseWithTools, NearAiError> {
+        self.warn_unverified("chat_with_tools");
         let request = ChatRequest {
             model: self.model.clone(),
             messages,
@@ -246,6 +249,9 @@ impl NearAiClient {
     }
 
     /// Send a streaming chat completion request.
+    ///
+    /// Not reported to the observer (the stream isn't kept byte-for-byte), so these
+    /// responses aren't verified.
     #[instrument(skip(self, messages), fields(message_count = messages.len()))]
     pub async fn chat_stream(
         &self,
@@ -253,6 +259,7 @@ impl NearAiClient {
         temperature: Option<f32>,
         max_tokens: Option<u32>,
     ) -> Result<impl Stream<Item = Result<String, NearAiError>>, NearAiError> {
+        self.warn_unverified("chat_stream");
         let request = ChatRequest {
             model: self.model.clone(),
             messages,
@@ -424,6 +431,14 @@ impl NearAiClient {
                 warn!("NEAR AI health check failed: {}", e);
                 false
             }
+        }
+    }
+
+    /// Only `chat` reports to the observer; say so loudly if another path is used
+    /// while verification is on.
+    fn warn_unverified(&self, method: &str) {
+        if self.observer.is_some() {
+            warn!("NEAR AI {method} responses are not verified; use chat for verified replies");
         }
     }
 
