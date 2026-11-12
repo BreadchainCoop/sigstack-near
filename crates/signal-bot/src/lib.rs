@@ -10,5 +10,6 @@ pub mod group_invite_acceptor;
 pub mod group_preferences_store;
 pub mod handlers_setup;
 pub mod menu_language;
+pub mod profile;
 pub mod transcribe_prefs;
 pub mod transcript_fanout;

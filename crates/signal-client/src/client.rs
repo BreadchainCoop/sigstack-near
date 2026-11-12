@@ -636,6 +636,54 @@ impl SignalClient {
 
         Ok(response.json().await?)
     }
+
+    /// Set the account's Signal profile: display name, optional about line, and optional
+    /// picture (`avatar` is the bytes of a JPEG or PNG file). Signal keeps the profile, so
+    /// this only needs to succeed once per change.
+    #[instrument(skip(self, avatar), fields(avatar_bytes = avatar.map(<[u8]>::len)))]
+    pub async fn set_profile(
+        &self,
+        phone_number: &str,
+        name: &str,
+        about: Option<&str>,
+        avatar: Option<&[u8]>,
+    ) -> Result<(), SignalError> {
+        use base64::Engine as _;
+
+        let mut body = serde_json::json!({ "name": name });
+        if let Some(about) = about {
+            body["about"] = about.into();
+        }
+        if let Some(avatar) = avatar {
+            body["base64_avatar"] = base64::engine::general_purpose::STANDARD
+                .encode(avatar)
+                .into();
+        }
+        let encoded_number = encode(phone_number);
+        let response = self
+            .client
+            .put(format!("{}/v1/profiles/{}", self.base_url, encoded_number))
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let message = format!(
+                "Set profile failed: {}",
+                response.text().await.unwrap_or_default()
+            );
+            return Err(if status.is_client_error() {
+                SignalError::Rejected {
+                    status: status.as_u16(),
+                    message,
+                }
+            } else {
+                SignalError::Api(message)
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Map incoming `groupInfo.groupId` (`internal_id`) to list-groups `id` for send.

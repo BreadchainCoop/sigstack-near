@@ -98,6 +98,18 @@ pub struct BotConfig {
     #[serde(default)]
     pub verifier_url: Option<String>,
 
+    /// Signal profile display name, set at startup. Unset leaves the profile as it is.
+    #[serde(default)]
+    pub profile_name: Option<String>,
+
+    /// Signal profile "about" line, set together with `profile_name`.
+    #[serde(default)]
+    pub profile_about: Option<String>,
+
+    /// Also set the profile picture bundled into the bot binary (`assets/avatar.jpg`).
+    #[serde(default)]
+    pub profile_avatar: bool,
+
     /// Log level
     #[serde(default = "default_log_level")]
     pub log_level: String,
@@ -204,6 +216,9 @@ impl Default for BotConfig {
             signal_username: Some(default_signal_username()),
             github_repo: None,
             verifier_url: None,
+            profile_name: None,
+            profile_about: None,
+            profile_avatar: false,
             log_level: default_log_level(),
         }
     }

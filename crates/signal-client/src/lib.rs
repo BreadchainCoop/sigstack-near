@@ -788,6 +788,74 @@ mod tests {
         assert!(err.to_string().contains("taken"));
     }
 
+    #[tokio::test]
+    async fn test_set_profile_with_avatar() {
+        let mock_server = MockServer::start().await;
+
+        // "abc" in standard base64 is "YWJj".
+        Mock::given(method("PUT"))
+            .and(path("/v1/profiles/%2B15555555555"))
+            .and(body_json(serde_json::json!({
+                "name": "Sigstack",
+                "about": "Private translation",
+                "base64_avatar": "YWJj"
+            })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        client
+            .set_profile(
+                "+15555555555",
+                "Sigstack",
+                Some("Private translation"),
+                Some(b"abc"),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_set_profile_name_only_and_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("PUT"))
+            .and(path("/v1/profiles/%2B15555555555"))
+            .and(body_json(serde_json::json!({ "name": "Sigstack" })))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad avatar"))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let err = client
+            .set_profile("+15555555555", "Sigstack", None, None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Set profile failed: bad avatar"));
+        assert!(matches!(err, SignalError::Rejected { status: 400, .. }));
+    }
+
+    #[tokio::test]
+    async fn test_set_profile_server_error_is_not_rejected() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("PUT"))
+            .and(path("/v1/profiles/%2B15555555555"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("starting"))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let err = client
+            .set_profile("+15555555555", "Sigstack", None, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SignalError::Api(ref m) if m.contains("starting")));
+    }
+
     #[test]
     fn test_bot_message_source_fields() {
         let incoming = IncomingMessage {
