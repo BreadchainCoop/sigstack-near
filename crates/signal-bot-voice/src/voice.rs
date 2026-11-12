@@ -101,7 +101,11 @@ impl CommandHandler for VoiceHandler {
     fn observe(&self, message: &BotMessage) {
         if let (Some(cache), Some(audio)) = (&self.voice_cache, message.primary_audio_attachment())
         {
-            cache.remember(message.reply_target(), message.message_timestamp, audio.clone());
+            cache.remember(
+                message.reply_target(),
+                message.message_timestamp,
+                audio.clone(),
+            );
         }
     }
 
