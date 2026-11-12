@@ -9,7 +9,10 @@ Built by [Bread Cooperative](https://bread.coop) for **NEAR HACKATHON** (1–14 
 **Private AI you don't have to trust, verifiable from your Signal message to the GPU.**
 
 - **Tracks:** Privacy & Private AI (`privacy`), AI Security & Defense (`security`)
-- **Status:** in development
+- **Live demo:** the bot runs on Phala Cloud and is registered with
+  [`agent.sigstack.testnet`](https://testnet.nearblocks.io/address/agent.sigstack.testnet).
+  - [Message the bot in Signal](https://signal.me/#eu/SbV9bgttO6r-3Zpak8AUB3WdIeIjgLsjAShkM6lcgQPihTCX4xJIpJnTmXFW4IwW).
+  - [Verifier page](https://breadchaincoop.github.io/sigstack-near/): the live contract state, every approved build, and a checker for `!verify` replies.
 
 ### What is new for the hackathon
 
@@ -18,8 +21,9 @@ Built by [Bread Cooperative](https://bread.coop) for **NEAR HACKATHON** (1–14 
    runs the published code, and every upgrade leaves a public record.
 2. **Model verification.** The bot verifies NEAR AI Cloud's model attestation and response
    signatures, so `!verify` covers the whole path: your message, this bot's TEE, and the model's TEE.
-3. **Optional: private payments through NEAR Intents.** Pay from any chain, with no card or name,
-   and receive a `!link` code redeemed inside the TEE.
+3. **Build provenance anyone can check.** Every approved build is archived with the commit it was
+   built from and GitHub-signed provenance for its images. CI re-checks them on every change, and
+   the verifier page checks them in your browser.
 
 ### Prior work and what is judged
 
@@ -28,12 +32,12 @@ Whisper and translation. Per the hackathon rules (Q-002 to Q-004), all of that i
 **Only the NEAR work listed above, built during the hackathon window, is submitted for judging.**
 
 - Baseline: [BreadchainCoop/sigstack-bot](https://github.com/BreadchainCoop/sigstack-bot) at
-  [`b9b4a0e`](https://github.com/BreadchainCoop/sigstack-bot/tree/b9b4a0eda886d54aa808ab2fe597e6c9a3943cf9)
+  [`f60e6ac`](https://github.com/BreadchainCoop/sigstack-bot/tree/f60e6ac3fed6a36b03996ee464a47435efd5ab39)
   (last commit 9 Oct 2026, before the hackathon was announced on 19 Oct). This repo carries its
-  full history; that commit is tagged `pre-hackathon`.
-- Hackathon work: everything after the `pre-hackathon` tag. Full diff:
-  [`pre-hackathon...hackathon-submission`](https://github.com/BreadchainCoop/sigstack-near/compare/pre-hackathon...hackathon-submission)
-  (until the submission tag exists: [`pre-hackathon...main`](https://github.com/BreadchainCoop/sigstack-near/compare/pre-hackathon...main))
+  full history, so the same commit is [`f60e6ac`](https://github.com/BreadchainCoop/sigstack-near/tree/f60e6ac3fed6a36b03996ee464a47435efd5ab39) here.
+- Hackathon work: everything after `f60e6ac`. Full diff:
+  [`f60e6ac...hackathon-submission`](https://github.com/BreadchainCoop/sigstack-near/compare/f60e6ac...hackathon-submission)
+  (until the submission tag exists: [`f60e6ac...main`](https://github.com/BreadchainCoop/sigstack-near/compare/f60e6ac...main))
 - The hackathon build runs on a separate demo deployment. The production Sigstack bot is not
   changed by this repo.
 
@@ -181,8 +185,7 @@ its registration, the NEAR AI models), then has:
 
 - **Your challenge:** `Sigstack: k3v9-pear`. The bot prefixes your text, then puts it in the
   quote's report data.
-- **Report data:** the challenge in hex. Check it with
-  `printf '%s' 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
+- **Report data:** the challenge in hex. A challenge over 64 bytes is SHA-256 hashed first.
 - **Compose hash:** should be `2c105ca7…20cf`, the same as above.
 - **NEAR AI models:** each model's signing key, compose hash, Intel TCB status and GPU count.
 - **How to check this reply:** a link to the verifier page's
@@ -196,10 +199,15 @@ reply came from inside the TEE just now.
 
 Then try the product:
 
-- **Voice, in a DM or a group:** `!transcribe-on`, then send a voice note. It's transcribed by
-  NEAR AI Whisper.
-- **Translation, in a group with the bot:** `!translate-me-on en es`, then write in either
+- **Translation, in a DM or a group:** quote-reply to any message with `!translate es` (any
+  language name or code). The bot checks that NEAR AI's response is signed by an attested model
+  instance before it replies.
+- **Auto-translation, in a group with the bot:** `!translate-me-on en es`, then write in either
   language. Your messages are translated into the other one.
+- **Voice, in a DM or a group:** `!transcribe-on`, then send a voice note. It's transcribed by
+  NEAR AI Whisper. As of 12 Nov, NEAR AI's Whisper endpoint rejects audio on their side, so
+  transcription replies with an error until they fix it. The Whisper model's attestation still
+  appears in `!verify`.
 - `!help` lists everything. See [Commands](#commands).
 
 #### 4. Run your own bot (optional)
@@ -221,21 +229,31 @@ Third-party code added for the hackathon work (rule Q-005):
     `dstack-sdk-types`.
   - Tests: [`near-api`](https://crates.io/crates/near-api) 0.8.6,
     [`near-sandbox`](https://crates.io/crates/near-sandbox) 0.3.11 and `tokio`.
-- **Bot** ([`crates/near-agent`](crates/near-agent)):
+- **Bot, registration** ([`crates/near-agent`](crates/near-agent)):
   - No new third-party crates. It uses `ring`, `reqwest`, `serde_json`, `base64`, `sha2` and
     `hex`, which were already in the lockfile.
   - It implements dcap-qvl's collateral-fetch protocol, NEAR transaction encoding and NEAR
     JSON-RPC directly.
+- **Bot, model verification** ([`crates/near-ai-client/src/verify`](crates/near-ai-client/src/verify)):
+  - [`dcap-qvl`](https://github.com/Phala-Network/dcap-qvl) 0.5.2, the same version the contract
+    uses, to verify NEAR AI's TDX quotes. Response signatures use `ring`.
+- **Verifier page** ([`verifier/`](verifier)): no third-party code. It's one static HTML file;
+  the CI checker is plain Python.
 - **Tools:**
   - [`cargo-near`](https://github.com/near/cargo-near) in the pinned
     `sourcescan/cargo-near:0.19.0-rust-1.86.0` image.
   - [near-cli-rs](https://github.com/near/near-cli-rs).
-  - GitHub Actions.
+  - GitHub Actions, including
+    [`actions/attest-build-provenance`](https://github.com/actions/attest-build-provenance) for
+    signed image provenance, checked with `gh attestation verify`.
 - **Services:**
   - [Phala Cloud](https://phala.com) (dstack TDX CVMs).
   - Phala's PCCS and Intel's PCS (quote collateral).
   - NEAR testnet RPC ([FastNEAR](https://fastnear.com)).
-  - [NEAR AI Cloud](https://cloud.near.ai).
+  - [NEAR AI Cloud](https://cloud.near.ai): models, and their attestation reports.
+  - [NVIDIA's attestation service](https://docs.nvidia.com/attestation/) (NRAS), for its verdict
+    on NEAR AI's GPUs.
+  - GitHub Pages, for the verifier page.
 
 ### Other submissions
 
@@ -316,6 +334,10 @@ More thorough local setup (Signal captcha registration, verify SMS/voice codes, 
 
 ## Phala
 
+The hackathon demo runs on its own CVM from [`docker/phala-demo.yaml`](docker/phala-demo.yaml);
+see [What the attestation pins](#what-the-attestation-pins). The command below is the production
+bot's upgrade path.
+
 ```bash
 # In-place upgrade of the surviving CVM (phone B stays; do not create a replacement)
 phala deploy --cvm-id 0e82fa77-8b15-4dbd-89c4-9045ab911353 \
@@ -329,18 +351,26 @@ After deploy / re-register, capture `username_token` from `phala logs` or `!bot-
 ## Project structure
 
 ```
+contracts/
+  agent/                        # NEAR agent contract (hackathon)
 crates/
   signal-bot/                   # Binary (hub + voice + translation)
+  signal-bot-core/              # Shared handler trait, command matching, errors
   signal-bot-voice/             # Voice / !transcribe* product crate
   whisper-client/               # NEAR Whisper STT client
-  near-ai-client/               # NEAR AI (chat + audio transcriptions)
+  near-ai-client/               # NEAR AI (chat + audio transcriptions; model verification is hackathon work)
+  near-agent/                   # Registration with the agent contract (hackathon)
   signal-client/                # Signal CLI REST client
+  signal-commerce/              # Stripe checkout + webhook sidecar for entitlements
   dstack-client/                # TEE attestation / key derive
   signal-registration-proxy/    # Ops helper for Signal registration
 docker/
   compose.yaml                  # local one-number stack
   phala.yaml                    # prod one-CVM suite
+  phala-demo.yaml               # hackathon demo: everything pinned, measured into the compose hash
+  phala-demo-register.yaml      # one-off Signal registration for the demo (never approved)
   .env.example / .phala.env.example
+verifier/                       # verifier page, build archive and CI checker (hackathon)
 docs/
   one-cvm-architecture.md       # one CVM / one phone; CVM storage
   in-chat-translation.md
