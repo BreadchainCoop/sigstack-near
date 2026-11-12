@@ -351,7 +351,7 @@ Translation: Signal text is processed in this TEE and translated via NEAR AI pri
 
 Transcription: Voice notes are decrypted in this TEE. Audio bytes (no phone, group id, or filename) are sent to NEAR AI Whisper Large V3 (GPU TEE). Transcripts come back here and are posted in Signal.
 
-Attestation: !verify <your text> attests this CVM's compose, not the remote Whisper weights. You get one reply from this bot.
+Attestation: !verify <your text> returns a quote from this CVM that signs your text, and the agent registration on NEAR that approved its code. It also reports the NEAR AI checks: every translation must be signed by an attested model GPU TEE, and the Whisper model is attested too (NEAR AI doesn't sign individual transcripts yet).
 
 !help"#;
 

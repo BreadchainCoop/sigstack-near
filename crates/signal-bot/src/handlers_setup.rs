@@ -10,6 +10,7 @@ use crate::transcribe_prefs::GroupTranscribePrefs;
 use crate::transcript_fanout::SuiteTranscriptFanout;
 use anyhow::Context;
 use dstack_client::DstackClient;
+use near_agent::AgentStatus;
 use near_ai_client::verify::{BackgroundVerifier, ModelVerifier, VerifierConfig};
 use near_ai_client::NearAiClient;
 use signal_bot_voice::{build_voice_handlers, SharedTranscriptFanout};
@@ -37,6 +38,7 @@ pub async fn build_handlers(
     dstack: Arc<DstackClient>,
     bot_identity: Arc<BotIdentity>,
     bot_username: String,
+    agent: Option<Arc<AgentStatus>>,
 ) -> AppResult<BuiltHandlers> {
     let near_cfg = config
         .near_ai
@@ -50,6 +52,7 @@ pub async fn build_handlers(
         near_cfg.timeout,
     )
     .context("Failed to create NEAR AI client")?;
+    let mut model_verifier = None;
     if near_cfg.verify_responses {
         let verifier = Arc::new(
             ModelVerifier::new(VerifierConfig::new(&near_cfg.base_url), &near_cfg.api_key)
@@ -65,7 +68,8 @@ pub async fn build_handlers(
         info!("Verifying NEAR AI responses and model attestations");
         near_ai = near_ai
             .with_no_aliasing(true)
-            .with_observer(Arc::new(BackgroundVerifier(verifier)));
+            .with_observer(Arc::new(BackgroundVerifier(verifier.clone())));
+        model_verifier = Some(verifier);
     }
     let near_ai = Arc::new(near_ai);
 
@@ -219,10 +223,17 @@ pub async fn build_handlers(
         bot_username,
     )));
     handlers.push(Box::new(CommandsHandler::new(group_prefs.clone())));
-    handlers.push(Box::new(VerifyHandler::new(dstack.clone()).with_links(
-        config.bot.github_repo.clone(),
-        config.bot.verifier_url.clone(),
-    )));
+    let mut verify = VerifyHandler::new(dstack.clone())
+        .with_links(
+            config.bot.github_repo.clone(),
+            config.bot.verifier_url.clone(),
+        )
+        .with_agent(agent);
+    if let Some(verifier) = model_verifier {
+        let whisper = config.whisper.enabled.then(|| config.whisper.model.clone());
+        verify = verify.with_model_verifier(verifier, near_cfg.model.clone(), whisper);
+    }
+    handlers.push(Box::new(verify));
     handlers.push(Box::new(HelpHandler::new()));
     handlers.push(Box::new(InfoHandler::new(group_prefs)));
     handlers.push(Box::new(PrivacyHandler::new()));
@@ -322,6 +333,7 @@ mod tests {
             dstack,
             BotIdentity::new(),
             "sigstack.test".into(),
+            None,
         )
         .await
         .expect("handlers with verification");
@@ -337,9 +349,16 @@ mod tests {
         let dstack = Arc::new(DstackClient::new(&config.dstack.socket_path));
         let identity = BotIdentity::new();
 
-        let built = build_handlers(&config, signal, dstack, identity, "sigstack.test".into())
-            .await
-            .expect("translation handlers");
+        let built = build_handlers(
+            &config,
+            signal,
+            dstack,
+            identity,
+            "sigstack.test".into(),
+            None,
+        )
+        .await
+        .expect("translation handlers");
         let handlers = built.handlers;
 
         assert_eq!(handlers.len(), 24);
@@ -387,9 +406,16 @@ mod tests {
         let dstack = Arc::new(DstackClient::new(&config.dstack.socket_path));
         let identity = BotIdentity::new();
 
-        let built = build_handlers(&config, signal, dstack, identity, "sigstack.test".into())
-            .await
-            .expect("translation handlers");
+        let built = build_handlers(
+            &config,
+            signal,
+            dstack,
+            identity,
+            "sigstack.test".into(),
+            None,
+        )
+        .await
+        .expect("translation handlers");
         let handlers = built.handlers;
 
         assert_eq!(handlers.len(), 23);
@@ -417,8 +443,15 @@ mod tests {
         let dstack = Arc::new(DstackClient::new(&config.dstack.socket_path));
         let identity = BotIdentity::new();
 
-        let result =
-            build_handlers(&config, signal, dstack, identity, "sigstack.test".into()).await;
+        let result = build_handlers(
+            &config,
+            signal,
+            dstack,
+            identity,
+            "sigstack.test".into(),
+            None,
+        )
+        .await;
         assert!(result.is_err(), "missing NEAR AI should fail");
         assert!(
             result.err().unwrap().to_string().contains("NEAR AI"),
