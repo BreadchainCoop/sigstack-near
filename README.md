@@ -152,9 +152,9 @@ The deployed code is traceable to this repo:
   `near account view-account-summary agent.sigstack.testnet network-config testnet now`.
 
 The demo bot is registered. At the time of writing, its agent account is
-[`30adc77b…64ed`](https://testnet.nearblocks.io/address/30adc77b1cd93c951c58e03a097796f1c445f1ff14e9c8c8afbd0ef5ad3b64ed),
+[`69c17c9a…f030`](https://testnet.nearblocks.io/address/69c17c9a8c0b9b15974b9a2b4c28a21a1930d82141eebc189a0978aca94ef030),
 registered in
-[`DRqsidZd…HUGj`](https://testnet.nearblocks.io/txns/DRqsidZdTDivnZdqR8gh49XiYHMZbHm42eHuzJ8fHUGj),
+[`EMLA42Gw…MiZc`](https://testnet.nearblocks.io/txns/EMLA42GwgSYjEznVwARuoqT8PAzoTSYu6o8HeEUQMiZc),
 relayed by the sponsor as a NEP-366 meta-transaction.
 The bot makes a new key on every boot, so after a restart the current one is the newest entry in
 `get_agents`. Registration lasts 7 days, and the bot re-registers before it expires.
@@ -163,7 +163,7 @@ To tie the registered bot to this repo:
 
 1. In `get_agents`, its `measurements.app_compose_hash_payload` is the compose hash the contract
    checked against the TDX quote. For the demo it is
-   `aa6d2877538eba1f5c33abde80547da1917ff640101b95d02b72143d7c1be536`.
+   `2c105ca7709c5b91b930e73eec46eef257011877251f6d8299fe8d37e6d720cf`.
 2. That hash is the sha256 of
    [`docker/phala-demo.app-compose.json`](docker/phala-demo.app-compose.json), which wraps
    [`docker/phala-demo.yaml`](docker/phala-demo.yaml) unchanged. See
@@ -183,7 +183,7 @@ its registration, the NEAR AI models), then has:
   quote's report data.
 - **Report data:** the challenge in hex. Check it with
   `printf '%s' 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
-- **Compose hash:** should be `aa6d2877…e536`, the same as above.
+- **Compose hash:** should be `2c105ca7…20cf`, the same as above.
 - **NEAR AI models:** each model's signing key, compose hash, Intel TCB status and GPU count.
 - **How to check this reply:** a link to the verifier page's
   [check section](https://breadchaincoop.github.io/sigstack-near/#check). Paste in your text and

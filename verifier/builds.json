@@ -1,12 +1,22 @@
 [
   {
+    "compose_hash": "2c105ca7709c5b91b930e73eec46eef257011877251f6d8299fe8d37e6d720cf",
+    "app_compose": "builds/2c105ca7709c5b91b930e73eec46eef257011877251f6d8299fe8d37e6d720cf.json",
+    "images_commit": "ca6b52c531075b106f074087eb2a70fee8123af1",
+    "images_run": 43313592527,
+    "compose_commit": "106ff84d8a798e2bf96f480584c50116529b730e",
+    "pinned_in_pr": 73,
+    "summary": "Current demo build, frozen for the demo video. !help lists !verify, direct messages no command matches get a pointer to !help, and the !verify reply is shorter, linking this page's check section.",
+    "provenance": "github"
+  },
+  {
     "compose_hash": "aa6d2877538eba1f5c33abde80547da1917ff640101b95d02b72143d7c1be536",
     "app_compose": "builds/aa6d2877538eba1f5c33abde80547da1917ff640101b95d02b72143d7c1be536.json",
     "images_commit": "ec3dd267df75f9ec82298cafd3aba7fa315da8d7",
     "images_run": 43297463975,
     "compose_commit": "2d946623c0ee5baae2a72c5202c46db32d2ba7bf",
     "pinned_in_pr": 68,
-    "summary": "Current demo build. Sets the bot's Signal profile at startup: the name Sigstack, an about line and a profile picture compiled into the binary, so people who haven't saved the number see who it is.",
+    "summary": "Sets the bot's Signal profile at startup: the name Sigstack, an about line and a profile picture compiled into the binary; replaced by 2c105ca7.",
     "provenance": "github"
   },
   {
