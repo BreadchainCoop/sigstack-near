@@ -27,12 +27,15 @@ https://proof.t16z.com. It checks that Intel signed it.
 64 bytes. Only code in this TEE could have quoted your challenge.
 3. **Code:** the compose hash must be one the agent contract approved before this bot \
 could register.";
+// Step 4 of "How to verify", depending on whether this bot checks the models itself.
 const NEAR_AI_NOTE: &str = "\
-**NEAR AI:** transcription and translation run on NEAR AI Cloud's GPU TEEs. Verify them \
+4. **Models:** transcription and translation run on NEAR AI Cloud's GPU TEEs. Verify them \
 at https://docs.near.ai/cloud/verification/";
 const NEAR_AI_CHECKED_NOTE: &str = "\
-**NEAR AI:** how this bot checks the models: \
-https://docs.near.ai/cloud/verification/ and docs/model-verification.md in the source.";
+4. **Models:** how this bot checks NEAR AI: https://docs.near.ai/cloud/verification/ and \
+docs/model-verification.md in the source.";
+/// With a verifier page, the steps above live there instead (its `#check` section).
+const CHECK_LINK_LABEL: &str = "**How to check this reply:**";
 const SUMMARY_TITLE: &str = "**🔐 Is this bot what it says it is?**";
 const TEE_LINE: &str = "\
 ✅ **This bot** runs in an Intel TDX TEE on Phala. Its quote, in the next message, signs \
@@ -220,7 +223,6 @@ impl VerifyHandler {
                 return AttestationResult {
                     in_tee: true,
                     compose_hash: app_info.compose_hash,
-                    app_id: app_info.app_id,
                     error: Some(format!("Failed to generate quote: {}", e)),
                     report_data_hex: Some(report_data_hex),
                     was_hashed,
@@ -232,7 +234,6 @@ impl VerifyHandler {
         AttestationResult {
             in_tee: true,
             compose_hash: app_info.compose_hash,
-            app_id: app_info.app_id,
             quote: quote.map(|q| q.quote),
             challenge: challenge.map(String::from),
             report_data_hex: Some(report_data_hex),
@@ -293,33 +294,47 @@ impl VerifyHandler {
                 lines.push(NO_CHALLENGE_NOTE.into());
             }
         }
+        // With a verifier page, the how-to (steps, check commands, agent details the page
+        // shows live) lives there, and the reply keeps only what's unique to it.
+        let page = self.verifier_url.as_deref();
         if let Some(report_data_hex) = &result.report_data_hex {
             lines.push(format!("**Report data:** `{report_data_hex}`"));
-            let check = if result.was_hashed {
-                HASH_CHECK
-            } else {
-                HEX_CHECK
-            };
-            lines.push(check.into());
+            if page.is_none() {
+                let check = if result.was_hashed {
+                    HASH_CHECK
+                } else {
+                    HEX_CHECK
+                };
+                lines.push(check.into());
+            }
         }
         lines.push(String::new());
         if let Some(hash) = &result.compose_hash {
             lines.push(format!("**Compose hash:** `{hash}`"));
         }
-        if let Some(id) = &result.app_id {
-            lines.push(format!("**App ID:** `{id}`"));
+        if page.is_none() {
+            lines.extend(self.agent_details());
         }
-        lines.extend(self.agent_details());
-        lines.extend(self.model_details(now));
+        lines.extend(self.model_details());
 
         if result.quote.is_some() {
             lines.push(String::new());
-            lines.push(HOW_TO_VERIFY.into());
-            if let Some(url) = &self.verifier_url {
-                lines.push(format!("   Approved builds, traced to source: {url}"));
+            match page {
+                Some(url) => lines.push(format!("{CHECK_LINK_LABEL} {url}#check")),
+                None => {
+                    lines.push(HOW_TO_VERIFY.into());
+                    lines.push(
+                        if self.models.is_some() {
+                            NEAR_AI_CHECKED_NOTE
+                        } else {
+                            NEAR_AI_NOTE
+                        }
+                        .into(),
+                    );
+                }
             }
             if let Some(repo) = &self.repo_url {
-                lines.push(format!("   Source: {repo}"));
+                lines.push(format!("Source: {repo}"));
             }
         } else if let Some(err) = &result.error {
             lines.push(String::new());
@@ -344,16 +359,6 @@ impl VerifyHandler {
                 lines.push("*Confirm them against the compose hash.*".into());
             }
         }
-
-        lines.push(String::new());
-        lines.push(
-            if self.models.is_some() {
-                NEAR_AI_CHECKED_NOTE
-            } else {
-                NEAR_AI_NOTE
-            }
-            .into(),
-        );
 
         // The quote goes out as its own message, one unbroken hex string, so it copies whole.
         let mut reply = lines.join("\n");
@@ -402,12 +407,9 @@ impl VerifyHandler {
             agent.account_id,
             explorer(&agent.contract_id, "address", &agent.account_id)
         );
+        // The summary already links the registration tx.
         if let Some(reg) = agent.state().registration {
-            line.push_str(&format!(
-                "\nRegistered in tx `{}`, valid until {}",
-                reg.tx_hash,
-                utc(reg.valid_until_ms)
-            ));
+            line.push_str(&format!("\nValid until {}", utc(reg.valid_until_ms)));
         }
         vec![line]
     }
@@ -476,7 +478,9 @@ impl VerifyHandler {
         lines
     }
 
-    fn model_details(&self, now: SystemTime) -> Vec<String> {
+    /// The evidence behind each model's summary line. When it was checked and how many
+    /// replies verified are already in the summary.
+    fn model_details(&self) -> Vec<String> {
         let Some(models) = &self.models else {
             return vec![];
         };
@@ -485,7 +489,7 @@ impl VerifyHandler {
         let names = std::iter::once(&models.chat_model).chain(models.whisper_model.as_ref());
         for model in names {
             let status = statuses.iter().find(|s| &s.model == model);
-            let Some((s, Some(instance))) = status.map(|s| (s, s.instance.as_ref())) else {
+            let Some(instance) = status.and_then(|s| s.instance.as_ref()) else {
                 lines.push(format!("- `{model}`: not attested yet"));
                 continue;
             };
@@ -494,22 +498,14 @@ impl VerifyHandler {
             } else {
                 format!(" ({})", instance.advisory_ids.join(", "))
             };
-            let mut line = format!(
+            lines.push(format!(
                 "- `{model}`: signing key `{}`, compose hash `{}`, Intel TCB {}{advisories}, \
-                 {} GPUs passed NVIDIA's check, {}.",
+                 {} GPUs passed NVIDIA's check.",
                 short(&instance.signing_key),
                 short(&instance.compose_hash),
                 instance.tcb_status,
                 instance.gpus,
-                ago(instance.verified_at, now)
-            );
-            if model == &models.chat_model {
-                line.push_str(&format!(
-                    " Replies: {} verified, {} failed.",
-                    s.verified_responses, s.failed_responses
-                ));
-            }
-            lines.push(line);
+            ));
         }
         lines
     }
@@ -611,7 +607,6 @@ fn explorer(contract_id: &str, kind: &str, id: &str) -> String {
 struct AttestationResult {
     in_tee: bool,
     compose_hash: Option<String>,
-    app_id: Option<String>,
     quote: Option<String>,
     challenge: Option<String>,
     report_data_hex: Option<String>,
@@ -724,7 +719,6 @@ mod tests {
         let result = AttestationResult {
             in_tee: true,
             compose_hash: Some("abc123".into()),
-            app_id: Some("app-456".into()),
             quote: Some("base64quote".into()),
             challenge: Some(challenge.into()),
             report_data_hex: Some(expected_hex.clone()),
@@ -754,7 +748,6 @@ mod tests {
         let result = AttestationResult {
             in_tee: true,
             compose_hash: Some("abc123".into()),
-            app_id: Some("app-456".into()),
             quote: Some("base64quote".into()),
             challenge: Some(long_challenge.clone()),
             report_data_hex: Some(expected_hex.clone()),
@@ -779,7 +772,6 @@ mod tests {
         let result = AttestationResult {
             in_tee: true,
             compose_hash: Some("abc123".into()),
-            app_id: Some("app-456".into()),
             quote: Some("base64quote".into()),
             challenge: Some(challenge.into()),
             report_data_hex: Some(report_data_hex.clone()),
@@ -820,7 +812,6 @@ mod tests {
         let result = AttestationResult {
             in_tee: true,
             compose_hash: Some("abc123".into()),
-            app_id: Some("app-456".into()),
             quote: Some("base64quote".into()),
             challenge: Some("test".into()),
             report_data_hex: Some(hex::encode("test".as_bytes())),
@@ -906,22 +897,42 @@ mod tests {
         assert!(response.contains("**Quote error:** socket closed"));
     }
 
-    // The code check links the verifier page and source when configured; blanks are ignored.
+    // With a verifier page, the reply links its check section instead of spelling out the
+    // steps, check commands and agent details the page shows. Blank links are ignored.
     #[test]
     fn code_check_links_verifier_and_source() {
-        let handler = create_test_handler().with_links(
-            Some("https://github.com/example/repo".into()),
-            Some("https://example.github.io/repo/".into()),
-        );
+        let status = Arc::new(AgentStatus::new(AGENT, "agent.sigstack.testnet"));
+        let handler = create_test_handler()
+            .with_links(
+                Some("https://github.com/example/repo".into()),
+                Some("https://example.github.io/repo/".into()),
+            )
+            .with_agent(Some(status));
         let result = AttestationResult {
             in_tee: true,
             compose_hash: Some("abc123".into()),
             quote: Some("00".into()),
+            report_data_hex: Some("5369".into()),
             ..Default::default()
         };
         let response = handler.format_response(result);
-        assert!(response.contains("traced to source: https://example.github.io/repo/"));
-        assert!(response.contains("Source: https://github.com/example/repo"));
+        assert!(response.contains(
+            "**How to check this reply:** https://example.github.io/repo/#check\n\
+             Source: https://github.com/example/repo"
+        ));
+        assert!(response.contains("**Report data:** `5369`"));
+        assert!(response.contains("**Compose hash:** `abc123`"));
+        // The summary still names the agent; the page has its details.
+        assert!(summary(&response).contains("agent `60b051d8…a661`"));
+        for gone in [
+            "How to verify",
+            "xxd -p",
+            "**Agent:**",
+            "proof.t16z",
+            "4. **Models:**",
+        ] {
+            assert!(!response.contains(gone), "{gone} should be on the page now");
+        }
 
         let blank = create_test_handler().with_links(Some(" ".into()), None);
         assert!(blank.repo_url.is_none());
@@ -1085,8 +1096,10 @@ mod tests {
              https://testnet.nearblocks.io/txns/8F1gnMdfnXivCfwzp9t9g1guLE66bt8bYxAJ9odx9tCD"
         ));
         assert!(registered.contains(
-            "Registered in tx `8F1gnMdfnXivCfwzp9t9g1guLE66bt8bYxAJ9odx9tCD`, valid until \
-             2027-01-22 06:40 UTC"
+            "**Agent:** `60b051d8aaa7c107d720d29fc016cf837ca915d5fe11637158bdc59c7912a661` \
+             https://testnet.nearblocks.io/address/\
+             60b051d8aaa7c107d720d29fc016cf837ca915d5fe11637158bdc59c7912a661\n\
+             Valid until 2027-01-22 06:40 UTC"
         ));
 
         let expired = handler.format_response_at(quoted(), at(1_900_000_000));
@@ -1132,8 +1145,7 @@ mod tests {
         assert!(response.contains("**NEAR AI models**"));
         assert!(response.contains(
             "- `deepseek-ai/DeepSeek-V4.1-Flash-1017`: signing key `236f5a6b…da4c`, compose hash \
-             `c53e254e…70fe`, Intel TCB UpToDate, 8 GPUs passed NVIDIA's check, checked 12 min \
-             ago. Replies: 41 verified, 0 failed."
+             `c53e254e…70fe`, Intel TCB UpToDate, 8 GPUs passed NVIDIA's check."
         ));
         assert!(response.contains("Intel TCB UpToDate (INTEL-SA-00837)"));
         assert!(response.contains(NEAR_AI_CHECKED_NOTE));

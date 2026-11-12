@@ -65,6 +65,15 @@
   .table-wrap { overflow-x: auto; }
   .note { color: var(--muted); font-size: 0.9rem; }
   .error { color: var(--bad); }
+  ol.steps { padding-left: 22px; margin: 0 0 12px; }
+  ol.steps li { margin: 8px 0; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  input[type="text"] {
+    width: 100%; font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+  }
+  input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .result { margin-top: 6px; min-height: 1.5em; }
   footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
 </style>
 </head>
@@ -82,6 +91,68 @@
   <section aria-labelledby="h-bot">
     <h2 id="h-bot">The registered bot</h2>
     <div id="bot" class="card"><span class="badge pending">Loading…</span></div>
+  </section>
+
+  <section aria-labelledby="h-check" id="check">
+    <h2 id="h-check">Check a <code>!verify</code> reply</h2>
+    <div class="card">
+      <p>
+        Send the bot <code>!verify &lt;random text&gt;</code> in Signal. It answers with two messages: a summary
+        with your challenge, its report data and its compose hash, then its TDX quote on its own.
+      </p>
+      <ol class="steps">
+        <li>
+          <strong>Signature.</strong> Long-press the second message, copy the quote, and paste it into
+          <a href="https://proof.t16z.com" rel="noopener">proof.t16z.com</a>. It checks that Intel signed it.
+        </li>
+        <li>
+          <strong>Freshness.</strong> The bot quotes <code>Sigstack: &lt;your text&gt;</code> as its report data:
+          the text's bytes as hex, or their SHA-256 when they're over 64 bytes. In the quote, the report data is
+          that value padded with zeros to 64 bytes. Only code in this TEE could have quoted your text. Check it
+          below, or with <code>printf '%s' 'Sigstack: &lt;your text&gt;' | xxd -p</code> (or
+          <code>| sha256sum</code> for long text).
+        </li>
+        <li>
+          <strong>Code.</strong> The compose hash must be one the owner approved (listed under
+          <a href="#h-builds">Approved builds</a>), and it should match the registered bot above.
+        </li>
+        <li>
+          <strong>Models.</strong> The reply also reports the NEAR AI models the bot uses. The page can't see
+          those checks; <a href="#h-models">how the bot checks NEAR AI</a> explains them.
+        </li>
+      </ol>
+
+      <label for="check-text">Your text (what you typed after <code>!verify</code>)</label>
+      <input type="text" id="check-text" autocomplete="off" spellcheck="false" placeholder="e.g. k3v9-pear">
+      <div class="result note" id="check-expected"></div>
+
+      <label for="check-report">Report data from the reply (optional)</label>
+      <input type="text" id="check-report" autocomplete="off" spellcheck="false" placeholder="hex">
+      <div class="result" id="check-report-result"></div>
+
+      <label for="check-compose">Compose hash from the reply</label>
+      <input type="text" id="check-compose" autocomplete="off" spellcheck="false" placeholder="64 hex characters">
+      <div class="result" id="check-compose-result"></div>
+      <p class="note">Everything here runs in your browser; nothing you type is sent anywhere.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-models">
+    <h2 id="h-models">How the bot checks NEAR AI</h2>
+    <div class="card">
+      <p>
+        Translation and transcription run on NEAR AI Cloud models in GPU TEEs. Inside its own TEE, the bot
+        checks each model's attestation: an Intel TDX quote, and NVIDIA's verdict on the GPUs. It then checks
+        that every translation is signed by the key of an attested instance. The <code>!verify</code> reply shows
+        each model's signing key, compose hash, Intel TCB status and GPU count, and how many translations
+        verified.
+      </p>
+      <p>
+        Whisper is attested too, but NEAR AI doesn't sign individual transcripts yet. Details:
+        <a href="https://github.com/BreadchainCoop/sigstack-near/blob/main/docs/model-verification.md">docs/model-verification.md</a>
+        and <a href="https://docs.near.ai/cloud/verification/" rel="noopener">NEAR AI's verification docs</a>.
+      </p>
+    </div>
   </section>
 
   <section aria-labelledby="h-builds">
@@ -146,7 +217,7 @@
         </li>
         <li>
           That the bot you message in Signal is this agent. Send it <code>!verify &lt;random text&gt;</code> and
-          compare its compose hash with the one above (see the README).
+          <a href="#check">check its reply</a>.
         </li>
         <li>
           The AI side. Messages are transcribed and translated by NEAR AI Cloud models in GPU TEEs. Builds from
@@ -463,6 +534,8 @@ async function main() {
     ]);
   } catch (e) {
     for (const id of ["bot", "builds", "contract", "agents"]) fail(id, e);
+    checkState.failed = true;
+    updateCheck();
     return;
   } finally {
     document.getElementById("f-rpc").textContent = rpcUsed;
@@ -482,6 +555,9 @@ async function main() {
   // The bot: the valid registration that expires last is the latest boot.
   const valid = agents.filter((a) => a.validity === "Valid").sort((a, b) => Number(b.valid_until_ms) - Number(a.valid_until_ms));
   const current = valid[0];
+  checkState.approved = measurements.map((m) => m.app_compose_hash_payload);
+  checkState.current = current ? current.measurements.app_compose_hash_payload : null;
+  updateCheck();
   if (!current) {
     fill("bot", badge("warn", "No valid registration right now"), el("p", { class: "note" }, "The bot may be restarting; it re-registers on boot."));
   } else {
@@ -565,6 +641,61 @@ async function main() {
     el("p", { class: "note", style: "margin-top:12px" }, "Source: ", link(`${GH}/tree/main/contracts/agent`, "contracts/agent"), ", adapted from NEAR's shade-agent-framework contract template."),
   );
 }
+
+// ---------- checking a !verify reply ----------
+
+// Filled in by main() once the contract is read.
+const checkState = { approved: null, current: null, failed: false };
+
+const toHex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+const cleanHex = (s) => s.trim().replace(/^0x/i, "").replace(/[`\s]/g, "").toLowerCase();
+
+// The bot quotes "Sigstack: <text>" (trimmed; a bare !verify uses "no-challenge-provided"):
+// its UTF-8 bytes, or their SHA-256 when over 64 bytes.
+async function expectedReportData(text) {
+  const bytes = new TextEncoder().encode(`Sigstack: ${text.trim() || "no-challenge-provided"}`);
+  if (bytes.length > 64) return { hex: await sha256Hex(bytes), hashed: true };
+  return { hex: toHex(bytes), hashed: false };
+}
+
+function composeVerdict(hash) {
+  if (!/^[0-9a-f]{64}$/.test(hash)) return badge("warn", "Not a 64-character hex hash");
+  if (checkState.failed) return badge("warn", "Couldn't read the contract to compare");
+  if (!checkState.approved) return badge("pending", "Reading the contract…");
+  if (!checkState.approved.includes(hash)) return badge("bad", "Not a build the owner approved");
+  if (hash === checkState.current) return badge("ok", "Approved, and it's the registered bot's build");
+  return badge("warn", "Approved, but not the registered bot's current build (it may have restarted on a newer one)");
+}
+
+let checkRun = 0;
+async function updateCheck() {
+  const run = ++checkRun;
+  const text = document.getElementById("check-text").value;
+  const report = cleanHex(document.getElementById("check-report").value);
+  const compose = cleanHex(document.getElementById("check-compose").value);
+  const expected = await expectedReportData(text);
+  if (run !== checkRun) return;
+
+  fill(
+    "check-expected",
+    expected.hashed ? "Expected report data (SHA-256, the text is over 64 bytes): " : "Expected report data: ",
+    el("span", { class: "mono" }, expected.hex),
+  );
+  // The reply shows the value; the quote holds it padded with zeros to 64 bytes. Accept either.
+  if (!report) fill("check-report-result");
+  else if (report === expected.hex || report === expected.hex.padEnd(128, "0")) {
+    fill("check-report-result", badge("ok", "Matches your text"));
+  } else {
+    fill("check-report-result", badge("bad", "Doesn't match your text"), " Check for typos in either field.");
+  }
+  if (!compose) fill("check-compose-result");
+  else fill("check-compose-result", composeVerdict(compose));
+}
+
+for (const id of ["check-text", "check-report", "check-compose"]) {
+  document.getElementById(id).addEventListener("input", updateCheck);
+}
+updateCheck();
 
 main();
 </script>

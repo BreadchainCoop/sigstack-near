@@ -176,14 +176,18 @@ on a device with Signal, or search for the username `sigstackdemo.98`. The demo 
 subscription; every command is open.
 
 To check you're talking to the attested bot, send `!verify <random text>`, e.g. `!verify k3v9-pear`.
-The bot answers with two messages. The first has:
+The bot answers with two messages. The first opens with a plain-language summary (this bot's TEE,
+its registration, the NEAR AI models), then has:
 
 - **Your challenge:** `Sigstack: k3v9-pear`. The bot prefixes your text, then puts it in the
   quote's report data.
 - **Report data:** the challenge in hex. Check it with
   `printf '%s' 'Sigstack: k3v9-pear' | xxd -p`. A challenge over 64 bytes is SHA-256 hashed first.
 - **Compose hash:** should be `aa6d2877…e536`, the same as above.
-- **How to verify:** the same three checks as here, with links to the verifier page and this repo.
+- **NEAR AI models:** each model's signing key, compose hash, Intel TCB status and GPU count.
+- **How to check this reply:** a link to the verifier page's
+  [check section](https://breadchaincoop.github.io/sigstack-near/#check). Paste in your text and
+  the reply's report data and compose hash, and it checks them against the approved builds.
 
 The second message is the TDX quote alone. Long-press it, copy it, and paste it into
 [proof.t16z.com](https://proof.t16z.com). It checks the Intel signature. Its report data
