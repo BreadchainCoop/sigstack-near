@@ -75,6 +75,35 @@
   input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .result { margin-top: 6px; min-height: 1.5em; }
   footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
+  nav.toc a {
+    text-decoration: none; font-size: 0.9rem; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface);
+  }
+  nav.toc a:hover { border-color: var(--accent); }
+  /* A card that folds: the summary is a one-line digest of what's inside. */
+  details.card { margin-top: 0; padding: 0; }
+  details.card > summary {
+    list-style: none; color: var(--text); padding: 12px 16px; display: flex; flex-wrap: wrap;
+    align-items: center; gap: 6px 10px;
+  }
+  details.card > summary::-webkit-details-marker { display: none; }
+  details.card > summary::before {
+    content: "▸"; color: var(--muted); width: 1em; transition: transform 0.15s;
+  }
+  details.card[open] > summary::before { transform: rotate(90deg); }
+  details.card[open] > summary { border-bottom: 1px solid var(--border); }
+  details.card > .body { padding: 12px 16px 16px; }
+  .sum-text {
+    flex: 1 1 100%; color: var(--muted); font-size: 0.9rem; padding-left: calc(1em + 10px);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  details.card[open] .sum-text { display: none; }
+  details.fold > summary { margin: 4px 0; }
+  .scope-group + .scope-group { margin-top: 4px; }
+  .scope-group > summary { font-weight: 600; color: var(--text); padding: 6px 0; }
+  tr.current td { background: var(--ok-bg); }
+  @media (prefers-reduced-motion: reduce) { details.card > summary::before { transition: none; } }
 </style>
 </head>
 <body>
@@ -87,6 +116,14 @@
     your browser, that every approved build traces to source published in
     <a href="https://github.com/BreadchainCoop/sigstack-near">the repo</a>.
   </p>
+  <nav class="toc" aria-label="On this page">
+    <a href="#h-bot">Registered bot</a>
+    <a href="#check">Check a reply</a>
+    <a href="#h-builds">Approved builds</a>
+    <a href="#h-contract">Contract</a>
+    <a href="#h-agents">Registrations</a>
+    <a href="#h-scope">What's verified</a>
+  </nav>
 
   <section aria-labelledby="h-bot">
     <h2 id="h-bot">The registered bot</h2>
@@ -106,11 +143,8 @@
           <a href="https://proof.t16z.com" rel="noopener">proof.t16z.com</a>. It checks that Intel signed it.
         </li>
         <li>
-          <strong>Freshness.</strong> The bot quotes <code>Sigstack: &lt;your text&gt;</code> as its report data:
-          the text's bytes as hex, or their SHA-256 when they're over 64 bytes. In the quote, the report data is
-          that value padded with zeros to 64 bytes. Only code in this TEE could have quoted your text. Check it
-          below, or with <code>printf '%s' 'Sigstack: &lt;your text&gt;' | xxd -p</code> (or
-          <code>| sha256sum</code> for long text).
+          <strong>Freshness.</strong> The bot quotes <code>Sigstack: &lt;your text&gt;</code> as its report data,
+          so only code in this TEE could have produced this quote for your text. Check it below.
         </li>
         <li>
           <strong>Code.</strong> The compose hash must be one the owner approved (listed under
@@ -134,13 +168,19 @@
       <input type="text" id="check-compose" autocomplete="off" spellcheck="false" placeholder="64 hex characters">
       <div class="result" id="check-compose-result"></div>
       <p class="note">Everything here runs in your browser; nothing you type is sent anywhere.</p>
-    </div>
-  </section>
 
-  <section aria-labelledby="h-models">
-    <h2 id="h-models">How the bot checks NEAR AI</h2>
-    <div class="card">
-      <p>
+      <details class="fold">
+        <summary>Check the report data from a terminal</summary>
+        <p>
+          The report data is the bytes of <code>Sigstack: &lt;your text&gt;</code> as hex, or their SHA-256 when
+          they're over 64 bytes. In the quote itself, that value is padded with zeros to 64 bytes.
+        </p>
+        <p><code>printf '%s' 'Sigstack: &lt;your text&gt;' | xxd -p</code> (or <code>| sha256sum</code> for long text)</p>
+      </details>
+
+      <details class="fold" id="h-models">
+        <summary>How the bot checks NEAR AI</summary>
+        <p>
         Translation and transcription run on NEAR AI Cloud models in GPU TEEs. Inside its own TEE, the bot
         checks each model's attestation: an Intel TDX quote, and NVIDIA's verdict on the GPUs. It then checks
         that every translation is signed by the key of an attested instance. The <code>!verify</code> reply shows
@@ -151,18 +191,24 @@
         Whisper is attested too, but NEAR AI doesn't sign individual transcripts yet. Details:
         <a href="https://github.com/BreadchainCoop/sigstack-near/blob/main/docs/model-verification.md">docs/model-verification.md</a>
         and <a href="https://docs.near.ai/cloud/verification/" rel="noopener">NEAR AI's verification docs</a>.
-      </p>
+        </p>
+      </details>
     </div>
   </section>
 
   <section aria-labelledby="h-builds">
     <h2 id="h-builds">Approved builds</h2>
     <p class="note">
-      A build is identified by its compose hash: the sha256 of <code>app_compose</code>, the JSON that
-      wraps the Docker Compose file, the CVM settings and Phala's pre-launch script. dstack measures it
-      into the TDX quote. For each build the owner approved, this page downloads the published
+      Newest first. For each build the owner approved, this page downloads the published
       <code>app_compose</code>, hashes it here, and lists the image digests it pins.
     </p>
+    <details class="fold">
+      <summary>What's a compose hash?</summary>
+      <p class="note">
+        The sha256 of <code>app_compose</code>, the JSON that wraps the Docker Compose file, the CVM settings
+        and Phala's pre-launch script. dstack measures it into the TDX quote, so it identifies the build.
+      </p>
+    </details>
     <div id="builds"><div class="card"><span class="badge pending">Loading…</span></div></div>
   </section>
 
@@ -177,58 +223,66 @@
       The bot generates a new key on every boot, so each restart registers a new account. Older ones stay
       listed until they expire; anyone can prune them after that.
     </p>
-    <div id="agents" class="card"><span class="badge pending">Loading…</span></div>
+    <div id="agents"><div class="card"><span class="badge pending">Loading…</span></div></div>
   </section>
 
   <section aria-labelledby="h-scope">
     <h2 id="h-scope">What is and isn't verified</h2>
     <div class="card">
-      <h3>Checked by the contract on NEAR, when the bot registered</h3>
-      <ul class="checks">
-        <li>The TDX quote is signed by Intel, using collateral that is in date, and the platform's TCB is up to date.</li>
-        <li>The quote's report data is the agent's own account ID, so a quote can't be reused by another account.</li>
-        <li>The firmware, OS and compose-hash measurements match a build the owner approved.</li>
-        <li>The CPU's PPID is on the owner's approved list.</li>
-      </ul>
-      <h3>Checked by this page, in your browser</h3>
-      <ul class="checks">
-        <li>Each approved compose hash is the sha256 of a published <code>app_compose</code> file.</li>
-        <li>That file pins every container image by digest.</li>
-        <li>
-          For this repo's images, what GitHub's signed build provenance says: the commit and workflow run that
-          built each digest.
-        </li>
-        <li>The contract's on-chain code is the wasm built by this repo's CI.</li>
-      </ul>
-      <h3>Checked by this repo's CI, on every change to the build archive</h3>
-      <ul class="checks">
-        <li>Each attested compose file is <code>docker/phala-demo.yaml</code> byte for byte, at the commit that pinned it.</li>
-        <li>The images were built from that commit or an earlier one.</li>
-        <li>On ghcr.io, the tag <code>sha-&lt;commit&gt;</code> of each of this repo's images is the pinned digest.</li>
-        <li>Where an image has GitHub provenance, its signature verifies and it names the stated commit.</li>
-      </ul>
-      <h3>Not verified here</h3>
-      <ul class="checks">
-        <li>
-          Provenance signatures. This page shows what the attestation claims; run the
-          <code>gh attestation verify</code> command shown next to an image to check its signature. Builds archived
-          before provenance signing have only the tag check. Rebuilding an image yourself is the strongest check,
-          but the builds aren't bit-for-bit reproducible yet.
-        </li>
-        <li>
-          That the bot you message in Signal is this agent. Send it <code>!verify &lt;random text&gt;</code> and
-          <a href="#check">check its reply</a>.
-        </li>
-        <li>
-          The AI side. Messages are transcribed and translated by NEAR AI Cloud models in GPU TEEs. Builds from
-          5f0f9eb9 on check those models' attestation and translation signatures inside the bot, and
-          <code>!verify</code> reports the result; this page can't see that.
-        </li>
-        <li>
-          The firmware and OS measurements (MRTD, RTMR0–2) are Phala's dstack image. They're approved as published,
-          not rebuilt here.
-        </li>
-      </ul>
+      <details class="scope-group">
+        <summary>Checked by the contract on NEAR, when the bot registered</summary>
+        <ul class="checks">
+          <li>The TDX quote is signed by Intel, using collateral that is in date, and the platform's TCB is up to date.</li>
+          <li>The quote's report data is the agent's own account ID, so a quote can't be reused by another account.</li>
+          <li>The firmware, OS and compose-hash measurements match a build the owner approved.</li>
+          <li>The CPU's PPID is on the owner's approved list.</li>
+        </ul>
+      </details>
+      <details class="scope-group">
+        <summary>Checked by this page, in your browser</summary>
+        <ul class="checks">
+          <li>Each approved compose hash is the sha256 of a published <code>app_compose</code> file.</li>
+          <li>That file pins every container image by digest.</li>
+          <li>
+            For this repo's images, what GitHub's signed build provenance says: the commit and workflow run that
+            built each digest.
+          </li>
+          <li>The contract's on-chain code is the wasm built by this repo's CI.</li>
+        </ul>
+      </details>
+      <details class="scope-group">
+        <summary>Checked by this repo's CI, on every change to the build archive</summary>
+        <ul class="checks">
+          <li>Each attested compose file is <code>docker/phala-demo.yaml</code> byte for byte, at the commit that pinned it.</li>
+          <li>The images were built from that commit or an earlier one.</li>
+          <li>On ghcr.io, the tag <code>sha-&lt;commit&gt;</code> of each of this repo's images is the pinned digest.</li>
+          <li>Where an image has GitHub provenance, its signature verifies and it names the stated commit.</li>
+        </ul>
+      </details>
+      <details class="scope-group" open>
+        <summary>Not verified here</summary>
+        <ul class="checks">
+          <li>
+            Provenance signatures. This page shows what the attestation claims; run the
+            <code>gh attestation verify</code> command shown next to an image to check its signature. Builds archived
+            before provenance signing have only the tag check. Rebuilding an image yourself is the strongest check,
+            but the builds aren't bit-for-bit reproducible yet.
+          </li>
+          <li>
+            That the bot you message in Signal is this agent. Send it <code>!verify &lt;random text&gt;</code> and
+            <a href="#check">check its reply</a>.
+          </li>
+          <li>
+            The AI side. Messages are transcribed and translated by NEAR AI Cloud models in GPU TEEs. Builds from
+            5f0f9eb9 on check those models' attestation and translation signatures inside the bot, and
+            <code>!verify</code> reports the result; this page can't see that.
+          </li>
+          <li>
+            The firmware and OS measurements (MRTD, RTMR0–2) are Phala's dstack image. They're approved as published,
+            not rebuilt here.
+          </li>
+        </ul>
+      </details>
     </div>
   </section>
 
@@ -468,22 +522,41 @@ function imageNode(ref, entry) {
   );
 }
 
-function renderBuild(m, check, agents) {
+function buildStatus(check) {
+  if (check.error) return badge("warn", `Couldn't check: ${check.error.message || check.error}`);
+  if (!check.entry) return badge("bad", "No published source for this hash");
+  if (check.matches) return badge("ok", "Published app_compose hashes to this");
+  return badge("bad", "Published file hashes to something else");
+}
+
+// Each build is a folded card; its summary line carries the verdict. Only the running build starts
+// open, and a build's image provenance is fetched from GitHub's API (rate-limited per visitor) when
+// it is first opened.
+function renderBuild(m, check, agents, isCurrent) {
   const hash = m.app_compose_hash_payload;
   const running = agents.filter((a) => a.measurements.app_compose_hash_payload === hash && a.validity === "Valid");
-  let status;
-  if (check.error) status = badge("warn", `Couldn't check: ${check.error.message || check.error}`);
-  else if (!check.entry) status = badge("bad", "No published source for this hash");
-  else if (check.matches) status = badge("ok", "Published app_compose hashes to this");
-  else status = badge("bad", "Published file hashes to something else");
-
+  const body = el("div", { class: "body" }, row("Compose hash", el("span", { class: "mono" }, hash)));
   const card = el(
-    "div",
-    { class: "card" },
-    el("div", { class: "row" }, el("span", { class: "mono" }, hash), status),
+    "details",
+    isCurrent ? { class: "card", open: "" } : { class: "card" },
+    el(
+      "summary",
+      {},
+      el("span", { class: "mono" }, short(hash, 8)),
+      isCurrent ? badge("ok", "Running now") : null,
+      buildStatus(check),
+      check.entry ? el("span", { class: "sum-text" }, check.entry.summary) : null,
+    ),
+    body,
   );
   if (check.entry) {
-    card.append(
+    const images = el("ul", { class: "checks" });
+    const fillImages = () => {
+      if (!images.childElementCount) images.append(...check.images.map((ref) => imageNode(ref, check.entry)));
+    };
+    if (isCurrent) fillImages();
+    else card.addEventListener("toggle", () => card.open && fillImages());
+    body.append(
       el("p", { class: "note" }, check.entry.summary),
       row("Published file", link(`${GH}/blob/main/verifier/${check.entry.app_compose}`, check.entry.app_compose.split("/").pop().slice(0, 12) + "….json")),
       row(
@@ -496,10 +569,10 @@ function renderBuild(m, check, agents) {
       row("Images built from", commitLink(check.entry.images_commit), " by the images workflow, ", runLink(check.entry.images_run)),
       row("Pinned in", link(`${GH}/pull/${check.entry.pinned_in_pr}`, `PR #${check.entry.pinned_in_pr}`)),
     );
-    if (!check.matches) card.append(row("Published file's sha256", el("span", { class: "mono" }, check.actual)));
-    card.append(el("h3", { style: "margin-top:12px" }, "Container images"), el("ul", { class: "checks" }, check.images.map((ref) => imageNode(ref, check.entry))));
+    if (!check.matches) body.append(row("Published file's sha256", el("span", { class: "mono" }, check.actual)));
+    body.append(el("h3", { style: "margin-top:12px" }, "Container images"), images);
   }
-  card.append(
+  body.append(
     row("Registered agents", running.length ? `${running.length} valid` : "none valid right now"),
     el(
       "details",
@@ -546,23 +619,28 @@ async function main() {
     index = [];
   }
 
-  // Approved builds.
-  const checks = await Promise.all(
-    measurements.map((m) => checkBuild(m.app_compose_hash_payload, index).catch((e) => ({ entry: null, error: e }))),
-  );
-  fill("builds", ...measurements.map((m, i) => renderBuild(m, checks[i], agents)));
-
   // The bot: the valid registration that expires last is the latest boot.
   const valid = agents.filter((a) => a.validity === "Valid").sort((a, b) => Number(b.valid_until_ms) - Number(a.valid_until_ms));
   const current = valid[0];
+  const currentHash = current ? current.measurements.app_compose_hash_payload : null;
   checkState.approved = measurements.map((m) => m.app_compose_hash_payload);
-  checkState.current = current ? current.measurements.app_compose_hash_payload : null;
+  checkState.current = currentHash;
   updateCheck();
+
+  // Approved builds, newest first. builds.json is kept newest first; an approved hash with no
+  // published entry goes on top, since that's the one a reader most needs to see.
+  const position = (m) => index.findIndex((b) => b.compose_hash === m.app_compose_hash_payload);
+  const ordered = [...measurements].sort((a, b) => position(a) - position(b));
+  const checks = await Promise.all(
+    ordered.map((m) => checkBuild(m.app_compose_hash_payload, index).catch((e) => ({ entry: null, error: e }))),
+  );
+  fill("builds", ...ordered.map((m, i) => renderBuild(m, checks[i], agents, m.app_compose_hash_payload === currentHash)));
+
   if (!current) {
     fill("bot", badge("warn", "No valid registration right now"), el("p", { class: "note" }, "The bot may be restarting; it re-registers on boot."));
   } else {
-    const hash = current.measurements.app_compose_hash_payload;
-    const i = measurements.findIndex((m) => m.app_compose_hash_payload === hash);
+    const hash = currentHash;
+    const i = ordered.findIndex((m) => m.app_compose_hash_payload === hash);
     const check = checks[i] || {};
     fill(
       "bot",
@@ -574,26 +652,27 @@ async function main() {
       el(
         "p",
         { style: "margin-top:12px" },
-        "To check you're talking to this bot, ",
-        link(CONFIG.signal, "open it in Signal"),
-        " and send ",
-        code("!verify <random text>"),
-        ". Its reply should show this compose hash, and its quote should verify on ",
-        link("https://proof.t16z.com", "proof.t16z.com"),
+        link(CONFIG.signal, "Open it in Signal"),
+        ", then ",
+        el("a", { href: "#check" }, "check that it's this bot"),
         ".",
       ),
     );
   }
 
-  // Registrations.
+  // Registrations: folded, since the bot card already shows the current one.
   const sorted = [...agents].sort((a, b) => Number(b.valid_until_ms) - Number(a.valid_until_ms));
   fill(
     "agents",
     sorted.length
       ? el(
-          "div",
-          { class: "table-wrap" },
+          "details",
+          { class: "card" },
+          el("summary", {}, `${sorted.length} registrations, ${valid.length} still valid`),
           el(
+            "div",
+            { class: "body table-wrap" },
+            el(
             "table",
             {},
             el("thead", {}, el("tr", {}, el("th", {}, "Agent account"), el("th", {}, "Status"), el("th", {}, "Valid until"), el("th", {}, "Build"))),
@@ -603,8 +682,8 @@ async function main() {
               sorted.map((a) =>
                 el(
                   "tr",
-                  {},
-                  el("td", {}, accountLink(a.account_id)),
+                  a === current ? { class: "current" } : {},
+                  el("td", {}, accountLink(a.account_id), a === current ? [" ", badge("ok", "Current")] : null),
                   el("td", {}, validityNode(a.validity)),
                   el("td", {}, when(a.valid_until_ms)),
                   el("td", { class: "mono" }, short(a.measurements.app_compose_hash_payload)),
@@ -612,8 +691,9 @@ async function main() {
               ),
             ),
           ),
+          ),
         )
-      : el("p", {}, "No agents are registered."),
+      : el("p", { class: "card" }, "No agents are registered."),
   );
 
   // The contract itself.
@@ -696,6 +776,14 @@ for (const id of ["check-text", "check-report", "check-compose"]) {
   document.getElementById(id).addEventListener("input", updateCheck);
 }
 updateCheck();
+
+// #h-models is a folded section: open it when a link (or the URL) points at it.
+function openTarget() {
+  const target = location.hash && document.getElementById(location.hash.slice(1));
+  if (target && target.tagName === "DETAILS") target.open = true;
+}
+window.addEventListener("hashchange", openTarget);
+openTarget();
 
 main();
 </script>
