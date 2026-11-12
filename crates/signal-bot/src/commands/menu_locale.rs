@@ -170,6 +170,7 @@ MENUS:
 !transcription
 
 OTHER:
+!verify <challenge>
 !info
 !privacy
 !help"#;
@@ -193,6 +194,9 @@ const INFO_HUB: &str = r#"--Sigstack--
 
 !transcription
   Voice transcription — quote !transcribe or !transcribe-on
+
+!verify <challenge>
+  Prove this bot runs the approved code in a TEE
 
 !privacy
   Privacy, TEE, and !verify attestation
@@ -390,7 +394,7 @@ mod tests {
         assert!(h.contains("!help\n  "));
         assert!(h.contains("\n\n!translation-in-chat"));
         assert!(h.contains("Privacy, TEE, and !verify attestation"));
-        assert!(!h.contains("!verify <challenge>"));
+        assert!(h.contains("!verify <challenge>\n  "));
     }
 
     #[test]
@@ -562,8 +566,12 @@ mod tests {
         assert!(!translation_threads_menu().contains("!verify"));
         assert!(!translation_in_chat_menu(true).contains("!verify"));
         assert!(!translation_in_chat_menu(false).contains("!verify"));
-        assert!(!help_menu().contains("!verify"));
         assert!(!thread_help_menu().contains("!verify"));
+    }
+
+    #[test]
+    fn help_lists_verify() {
+        assert!(help_menu().contains("OTHER:\n!verify <challenge>\n"));
     }
 
     #[test]
