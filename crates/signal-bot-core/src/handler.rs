@@ -33,6 +33,8 @@ pub trait CommandHandler: Send + Sync {
     /// Sees every incoming message before dispatch picks a handler, whichever handler (if
     /// any) then runs it. For bookkeeping a later command needs, such as remembering voice
     /// notes so `!transcribe` can find the one it replies to. Must be cheap and not block.
+    /// Runs before the entitlement gate, so it also sees messages from chats the gate will
+    /// deny. Keep what it records minimal; the command that uses it is still gated.
     fn observe(&self, _message: &BotMessage) {}
 
     /// Execute the command.

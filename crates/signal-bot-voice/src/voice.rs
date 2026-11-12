@@ -96,10 +96,12 @@ impl VoiceHandler {
 impl CommandHandler for VoiceHandler {
     /// Remembers every voice note, including in chats without auto-transcribe, which is where
     /// `!transcribe` is used: Signal's quote of a voice note doesn't carry its attachment.
+    /// Keyed by the sent timestamp (`dataMessage.timestamp`), which is what a quote's `id`
+    /// holds; the envelope timestamp can differ for a redelivered message.
     fn observe(&self, message: &BotMessage) {
         if let (Some(cache), Some(audio)) = (&self.voice_cache, message.primary_audio_attachment())
         {
-            cache.remember(message.reply_target(), message.timestamp, audio.clone());
+            cache.remember(message.reply_target(), message.message_timestamp, audio.clone());
         }
     }
 
@@ -350,6 +352,9 @@ mod tests {
         assert!(handler.handles_own_reply());
         let out = handler.execute(&msg).await.unwrap();
         assert!(out.is_empty());
+        // Only `observe` caches, so each note is remembered once.
+        let cached = cache.lookup(msg.reply_target(), msg.message_timestamp);
+        assert!(cached.is_none());
     }
 
     #[test]
@@ -364,11 +369,16 @@ mod tests {
         .with_voice_cache(cache.clone())
         .with_transcribe_store(Arc::new(TranscribeStore::new(None)));
 
-        let msg = dm_voice(Some(16));
+        // A redelivered envelope: its timestamp differs from the sent timestamp, which is
+        // what a quote of this note carries as its id.
+        let mut msg = dm_voice(Some(16));
+        msg.timestamp = 1_000;
+        msg.message_timestamp = 77;
         assert!(!handler.matches(&msg), "auto-transcribe is off");
         handler.observe(&msg);
-        let cached = cache.lookup(msg.reply_target(), msg.timestamp).unwrap();
+        let cached = cache.lookup(msg.reply_target(), 77).unwrap();
         assert_eq!(cached.id, "att-1");
+        assert!(cache.lookup(msg.reply_target(), 1_000).is_none());
     }
 
     #[test]
