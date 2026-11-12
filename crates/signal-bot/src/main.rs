@@ -9,9 +9,7 @@ use signal_bot::dispatch::dispatch_message;
 use signal_bot::ensure_username::ensure_signal_username;
 use signal_bot::entitlement_gate::EntitlementGate;
 use signal_bot::error::AppResult;
-use signal_bot::group_invite_acceptor::{
-    run_invite_acceptor, InvitePolicy, DEFAULT_INVITE_POLL_INTERVAL,
-};
+use signal_bot::group_invite_acceptor::{run_invite_acceptor, InvitePolicy, InviteSchedule};
 use signal_bot::handlers_setup::build_handlers;
 use signal_client::{MessageReceiver, SignalClient};
 use std::sync::Arc;
@@ -147,7 +145,7 @@ async fn main() -> AppResult<()> {
                 signal_invites,
                 phone,
                 policy,
-                DEFAULT_INVITE_POLL_INTERVAL,
+                InviteSchedule::default(),
                 group_updates,
             )
             .await;

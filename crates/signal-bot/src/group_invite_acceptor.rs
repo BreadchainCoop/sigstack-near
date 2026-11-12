@@ -16,6 +16,29 @@ use tracing::{debug, info, warn};
 /// receive loop didn't flag as group updates.
 pub const DEFAULT_INVITE_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Shortest time between scans that a group update can trigger. Every update in every group
+/// (renames, joins, leaves) wakes the acceptor, so a busy group could otherwise keep the
+/// account listing groups.
+pub const DEFAULT_INVITE_MIN_GAP: Duration = Duration::from_secs(10);
+
+/// When the invite acceptor scans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InviteSchedule {
+    /// Fallback poll: scan at least this often.
+    pub poll_interval: Duration,
+    /// After a group update, wait until this long since the last scan before scanning again.
+    pub min_gap: Duration,
+}
+
+impl Default for InviteSchedule {
+    fn default() -> Self {
+        Self {
+            poll_interval: DEFAULT_INVITE_POLL_INTERVAL,
+            min_gap: DEFAULT_INVITE_MIN_GAP,
+        }
+    }
+}
+
 /// Policy for which pending invites to accept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvitePolicy {
@@ -86,21 +109,24 @@ pub async fn resolve_account_phone(
     }
 }
 
-/// Background loop: accept pending invites per policy, each time `group_updates` is notified
-/// and at least every `poll_interval`.
+/// Background loop: accept pending invites per policy. Scans at start, then whenever
+/// `group_updates` is notified (no sooner than `schedule.min_gap` after the last scan) or
+/// `schedule.poll_interval` passes, whichever comes first.
 pub async fn run_invite_acceptor(
     signal: Arc<SignalClient>,
     phone_number: Option<String>,
     policy: InvitePolicy,
-    poll_interval: Duration,
+    schedule: InviteSchedule,
     group_updates: Arc<Notify>,
 ) {
     info!(
         ?policy,
-        interval_secs = poll_interval.as_secs(),
+        interval_secs = schedule.poll_interval.as_secs(),
+        min_gap_secs = schedule.min_gap.as_secs(),
         "Group invite acceptor started"
     );
     loop {
+        let scanned_at = tokio::time::Instant::now();
         if let Some(account) = resolve_account_phone(&signal, phone_number.as_deref()).await {
             let n = accept_pending_invites(&signal, &account, &policy).await;
             if n == 0 {
@@ -110,8 +136,11 @@ pub async fn run_invite_acceptor(
             warn!("No Signal account available for invite accept; retrying");
         }
         tokio::select! {
-            _ = tokio::time::sleep(poll_interval) => {}
-            _ = group_updates.notified() => debug!("Group update received; checking invites"),
+            _ = tokio::time::sleep(schedule.poll_interval) => {}
+            _ = group_updates.notified() => {
+                debug!("Group update received; checking invites");
+                tokio::time::sleep_until(scanned_at + schedule.min_gap).await;
+            }
         }
     }
 }
@@ -210,7 +239,10 @@ mod tests {
             signal,
             Some("+15550002222".into()),
             InvitePolicy::AcceptAll,
-            Duration::from_secs(3600),
+            InviteSchedule {
+                poll_interval: Duration::from_secs(3600),
+                min_gap: Duration::ZERO,
+            },
             notify.clone(),
         ));
 
@@ -241,10 +273,50 @@ mod tests {
             signal,
             Some("+15550002222".into()),
             InvitePolicy::AcceptAll,
-            Duration::from_millis(20),
+            InviteSchedule {
+                poll_interval: Duration::from_millis(20),
+                min_gap: Duration::ZERO,
+            },
             Arc::new(Notify::new()),
         ));
         wait_for_calls(&server, 3).await;
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn acceptor_spaces_out_scans_from_group_updates() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/groups/%2B15550002222"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+
+        let notify = Arc::new(Notify::new());
+        let signal = Arc::new(SignalClient::new(server.uri()).unwrap());
+        let task = tokio::spawn(run_invite_acceptor(
+            signal,
+            Some("+15550002222".into()),
+            InvitePolicy::AcceptAll,
+            InviteSchedule {
+                poll_interval: Duration::from_secs(3600),
+                min_gap: Duration::from_millis(400),
+            },
+            notify.clone(),
+        ));
+
+        wait_for_calls(&server, 1).await;
+        notify.notify_one();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(list_calls(&server).await, 1, "update inside the gap waits");
+        wait_for_calls(&server, 2).await;
+        task.abort();
+    }
+
+    #[test]
+    fn default_schedule_polls_every_minute() {
+        let s = InviteSchedule::default();
+        assert_eq!(s.poll_interval, Duration::from_secs(60));
+        assert_eq!(s.min_gap, Duration::from_secs(10));
     }
 }

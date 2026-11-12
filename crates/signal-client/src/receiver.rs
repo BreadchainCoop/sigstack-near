@@ -313,5 +313,8 @@ mod tests {
             msg = stream.next() => panic!("group update yielded a message: {msg:?}"),
             _ = tokio::time::sleep(Duration::from_secs(2)) => panic!("not notified"),
         }
+        // The receive mock keeps returning the update; none of those reach the stream.
+        let next = tokio::time::timeout(Duration::from_millis(300), stream.next()).await;
+        assert!(next.is_err(), "group update yielded a message: {next:?}");
     }
 }
