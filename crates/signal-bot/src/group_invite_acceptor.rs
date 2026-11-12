@@ -216,7 +216,11 @@ mod tests {
 
         wait_for_calls(&server, 1).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(list_calls(&server).await, 1, "no scan before the hour-long poll");
+        assert_eq!(
+            list_calls(&server).await,
+            1,
+            "no scan before the hour-long poll"
+        );
 
         notify.notify_one();
         wait_for_calls(&server, 2).await;
