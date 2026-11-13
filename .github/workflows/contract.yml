@@ -51,3 +51,46 @@ jobs:
         with:
           name: agent-contract-wasm
           path: contracts/agent/target/near/*.wasm
+
+  # The wasm to deploy. `cargo near build reproducible-wasm` builds in the image pinned in
+  # Cargo.toml and embeds NEP-330 build_info (image, command, path, git commit), which is what
+  # SourceScan rebuilds from to verify the contract on NearBlocks. It needs a clean checkout of
+  # a pushed commit, so PRs build their head commit rather than the merge commit.
+  reproducible:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: contracts/agent
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Same cargo-near version as the build image, from its release, checked by sha256.
+      - name: Install cargo-near 0.19.0
+        working-directory: .
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cargo-near.tgz" \
+            https://github.com/near/cargo-near/releases/download/cargo-near-v0.19.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          echo "99edfb4ab82c0e2b4b6d234fc6ab53a1994d88a5900cc1ffd5ca85e8b9d810b0  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/cargo-near"
+          tar xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP/cargo-near"
+          install -m 755 "$(find "$RUNNER_TEMP/cargo-near" -type f -name cargo-near | head -1)" "$HOME/.cargo/bin/cargo-near"
+          cargo near --version
+
+      - run: cargo near build reproducible-wasm
+
+      - name: Record wasm hash and build info
+        run: |
+          {
+            echo '### Agent contract wasm (reproducible, deployable)'
+            echo '```'
+            sha256sum target/near/*.wasm
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-contract-wasm-reproducible
+          path: contracts/agent/target/near/*.wasm
