@@ -48,13 +48,21 @@ near account create-account sponsor-by-faucet-service <contract>.testnet \
 ../../scripts/deploy_agent_contract.sh <contract>.testnet <owner>.testnet
 ```
 
-The script deploys the wasm CI built from main with `requires_tee = true` and a 7-day
-expiration. Measurements and the PPID are approved once the demo CVM is running.
+The script deploys the wasm CI built reproducibly from main with `requires_tee = true` and a 7-day
+expiration. Measurements and the PPID are approved once the demo CVM is running. To upgrade a
+deployed contract instead, the owner calls `update_contract` with that wasm.
+
+The deployable wasm comes from the workflow's `reproducible` job:
+`cargo near build reproducible-wasm` (cargo-near 0.19.0, the same as the image). It builds a
+clean checkout of a pushed commit in the image pinned in `Cargo.toml`, and embeds the NEP-330
+build info that NearBlocks uses to rebuild and verify the contract.
 
 ## Building the contract
 
 You currently need to build this contract without an ABI. CI builds it with
-[`.github/workflows/contract.yml`](../../.github/workflows/contract.yml).
+[`.github/workflows/contract.yml`](../../.github/workflows/contract.yml). The commands below are
+for local builds and tests; to reproduce the deployed wasm, run
+`cargo near build reproducible-wasm` from this directory on a clean checkout of its commit.
 
 ### Linux
 
