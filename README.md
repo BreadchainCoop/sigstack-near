@@ -174,8 +174,9 @@ The deployed code is traceable to this repo:
   of the same sha256. Check it with
   `near account view-account-summary agent.sigstack.testnet network-config testnet now`.
 - **Rebuildable:** the wasm embeds its NEP-330 build info (the pinned image, the build command and
-  the commit). Call `contract_source_metadata` to read it. NearBlocks rebuilds from it to verify
-  the contract on its Contract tab.
+  the commit). Call `contract_source_metadata` to read it. The contract is
+  [verified on NearBlocks](https://testnet.nearblocks.io/address/agent.sigstack.testnet?tab=contract),
+  which rebuilt it from that info through SourceScan.
 
 The demo bot is registered. At the time of writing, its agent account is
 [`69c17c9a…f030`](https://testnet.nearblocks.io/address/69c17c9a8c0b9b15974b9a2b4c28a21a1930d82141eebc189a0978aca94ef030),
