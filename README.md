@@ -165,13 +165,17 @@ near contract call-function as-read-only agent.sigstack.testnet get_approved_mea
 
 The deployed code is traceable to this repo:
 
-- **Source:** the wasm the [`contract`](.github/workflows/contract.yml) workflow built from
-  commit `66f4b00` ([run 42946350559](https://github.com/BreadchainCoop/sigstack-near/actions/runs/42946350559)).
-- **wasm sha256:** `9890b61e434341c2c2b995e71690c054edd0ed0b960da421e267771366017667`, as logged
+- **Source:** the wasm the [`contract`](.github/workflows/contract.yml) workflow built
+  reproducibly from commit `0d5671a`
+  ([run 43456527356](https://github.com/BreadchainCoop/sigstack-near/actions/runs/43456527356)).
+- **wasm sha256:** `f8dc2a4114afabd8caa8bcd506968cfbcbc34c3bfe8b32b6d6ae6eaf548c3feb`, as logged
   by that run.
-- **On-chain code hash:** `BGYxJkzMBrZZZ7Ju8D9UDV7rNpXfuw3ZG7de7xrAUPUA`. This is the base58 form
+- **On-chain code hash:** `HkSpoPpzqi4dQP7z77kbp8gCfYhvTQ8x1PVFgm4g3exa`. This is the base58 form
   of the same sha256. Check it with
   `near account view-account-summary agent.sigstack.testnet network-config testnet now`.
+- **Rebuildable:** the wasm embeds its NEP-330 build info (the pinned image, the build command and
+  the commit). Call `contract_source_metadata` to read it. NearBlocks rebuilds from it to verify
+  the contract on its Contract tab.
 
 The demo bot is registered. At the time of writing, its agent account is
 [`69c17c9a…f030`](https://testnet.nearblocks.io/address/69c17c9a8c0b9b15974b9a2b4c28a21a1930d82141eebc189a0978aca94ef030),

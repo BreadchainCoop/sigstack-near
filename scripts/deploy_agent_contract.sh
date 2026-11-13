@@ -31,7 +31,7 @@ else
     exit 1
   fi
   DIR=$(mktemp -d)
-  gh run download "$RUN_ID" -R "$REPO" -n agent-contract-wasm -D "$DIR"
+  gh run download "$RUN_ID" -R "$REPO" -n agent-contract-wasm-reproducible -D "$DIR"
   WASM="$DIR/sigstack_agent.wasm"
   echo "Using wasm from run $RUN_ID (commit $HEAD_SHA)"
 fi
