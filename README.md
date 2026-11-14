@@ -9,6 +9,8 @@ Built by [Bread Cooperative](https://bread.coop) for **NEAR HACKATHON** (1–14 
 **Private AI you don't have to trust, verifiable from your Signal message to the GPU.**
 
 - **Tracks:** Privacy & Private AI (`privacy`), AI Security & Defense (`security`)
+- **Demo video:** [2-minute walkthrough on X](https://x.com/0xbagelface/status/2121631717899301150):
+  translation, `!verify`, the quote on proof.t16z.com, the on-chain registration and the verifier page.
 - **Live demo:** the bot runs on Phala Cloud and is registered with
   [`agent.sigstack.testnet`](https://testnet.nearblocks.io/address/agent.sigstack.testnet).
   - [Message the bot in Signal](https://signal.me/#eu/SbV9bgttO6r-3Zpak8AUB3WdIeIjgLsjAShkM6lcgQPihTCX4xJIpJnTmXFW4IwW).
